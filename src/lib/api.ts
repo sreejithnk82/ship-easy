@@ -1,0 +1,135 @@
+// Thin client for the Apps Script web app.
+//
+// Calls go out as a "simple" POST (Content-Type: text/plain) so the browser
+// skips the CORS preflight that Apps Script can't answer; the body is still
+// JSON. Every call carries the current Google ID token, and the server derives
+// identity/role from it.
+
+import { WEBAPP_URL } from './config';
+import { ensureIdToken } from './auth';
+
+export class ApiError extends Error {
+  code: string;
+  detail?: string;
+  available?: number;
+  constructor(code: string, detail?: string, extra?: Record<string, any>) {
+    super(detail ? `${code}: ${detail}` : code);
+    this.code = code;
+    this.detail = detail;
+    if (extra) Object.assign(this, extra);
+  }
+}
+
+export async function callApi<T = any>(action: string, payload: Record<string, any> = {}): Promise<T> {
+  if (!WEBAPP_URL) throw new ApiError('NO_ENDPOINT', 'VITE_WEBAPP_URL is not set.');
+
+  const token = await ensureIdToken();
+  let res: Response;
+  try {
+    res = await fetch(WEBAPP_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action, token, payload }),
+      redirect: 'follow',
+    });
+  } catch (e: any) {
+    throw new ApiError('NETWORK', e?.message || 'Network request failed');
+  }
+
+  let data: any;
+  try {
+    data = await res.json();
+  } catch {
+    throw new ApiError('BAD_RESPONSE', `HTTP ${res.status}: non-JSON response`);
+  }
+
+  if (!data || data.ok !== true) {
+    const { error, detail, ...rest } = data || {};
+    throw new ApiError(error || 'ERROR', detail, rest);
+  }
+  return data as T;
+}
+
+/* Typed wrappers for the actions the UI uses. */
+
+export interface Sender {
+  customerId: string; name: string;
+  senderPincode: string; senderName: string; senderPhone: string;
+  senderAddr1: string; senderAddr2: string; senderCity: string;
+  senderState: string; senderEmail: string; hubCustomerCode: string;
+}
+export interface Profile { email: string; role: string; customerId: string; customer?: Sender; }
+export interface Product {
+  productId: string;
+  productCode: string;
+  name: string;
+  hubCustomerCode: string;
+  senderName: string; senderPhone: string; senderAddr1: string; senderAddr2: string;
+  senderCity: string; senderState: string; senderPincode: string; senderEmail: string;
+  content: string;
+  description: string;
+  declaredValue: number;
+  weightG: number; lengthCm: number; widthCm: number; heightCm: number;
+}
+export interface OrderInput {
+  clientOrderId: string; productId: string;
+  receiverName: string; receiverPhone: string; receiverPincode: string;
+  receiverLine1: string; receiverLine2: string; receiverState: string;
+}
+export interface OpenOrder extends Omit<OrderInput, 'clientOrderId'> { orderId: string; trackingId: string; }
+export interface Assignment { clientOrderId: string; trackingId: string; }
+
+export interface Customer {
+  customerId: string; name: string; spreadsheetId?: string;
+  senderPincode: string; senderName: string; senderCity: string;
+  senderState: string; hubCustomerCode: string; status: string;
+}
+export interface UserRow { email: string; customerId: string; role: string; status: string; }
+export interface HubCode { code: string; label: string; }
+export interface TrackingRange {
+  seq: number; prefix: string; start: number; end: number;
+  pad: number; cursor: number; status: string; remaining: number;
+  allocated: number; used: boolean;
+}
+
+export const api = {
+  getProfile: () => callApi<Profile & { ok: true }>('getProfile'),
+  listProducts: (customerId?: string) => callApi<{ products: Product[] }>('listProducts', { customerId }),
+  addProduct: (product: Partial<Product>, customerId?: string) =>
+    callApi<{ productId: string }>('addProduct', { product, customerId }),
+  updateProduct: (productId: string, product: Partial<Product>, customerId?: string) =>
+    callApi<{ changed: number }>('updateProduct', { productId, product, customerId }),
+  deleteProduct: (productId: string, customerId?: string) =>
+    callApi<{ ok: true }>('deleteProduct', { productId, customerId }),
+  generateLabels: (customerId: string, idempotencyKey: string, orders: OrderInput[]) =>
+    callApi<{ batchId: string; count: number; assignments: Assignment[] }>(
+      'generateLabels', { customerId, idempotencyKey, orders }),
+  listOpenOrders: (customerId: string) => callApi<{ orders: OpenOrder[] }>('listOpenOrders', { customerId }),
+  updateOrder: (
+    customerId: string,
+    key: { orderId?: string; trackingId?: string },
+    fields: Partial<Omit<OpenOrder, 'orderId' | 'trackingId'>>,
+  ) => callApi<{ changed: number }>('updateOrder', { customerId, ...key, fields }),
+  commitShipment: (customerId: string, trackingIds: string[], manifestId?: string) =>
+    callApi<{ manifestId: string; marked: string[]; alreadyShipped: string[]; notFound: string[] }>(
+      'commitShipment', { customerId, trackingIds, manifestId }),
+
+  // superadmin onboarding
+  listCustomers: () => callApi<{ customers: Customer[] }>('listCustomers'),
+  createCustomer: (customer: Partial<Customer> & { customerId: string; name: string }) =>
+    callApi<{ customerId: string; spreadsheetUrl: string }>('createCustomer', { customer }),
+  listHubCodes: () => callApi<{ hubCodes: HubCode[] }>('listHubCodes'),
+  addHubCode: (code: string, label?: string) => callApi<{ ok: true }>('addHubCode', { code, label }),
+  addUser: (user: { email: string; customerId: string; role: string }) =>
+    callApi<{ ok: true }>('addUser', { user }),
+  listUsers: () => callApi<{ users: UserRow[] }>('listUsers'),
+  addTrackingRange: (customerId: string, range: { prefix?: string; start: number; end: number; pad?: number }) =>
+    callApi<{ seq: number }>('addTrackingRange', { customerId, range }),
+  listTrackingRanges: (customerId: string) => callApi<{ ranges: TrackingRange[] }>('listTrackingRanges', { customerId }),
+  updateTrackingRange: (customerId: string, seq: number, range: { prefix?: string; start?: number; end?: number; pad?: number; status?: string }) =>
+    callApi<{ ok: true }>('updateTrackingRange', { customerId, seq, range }),
+  deleteTrackingRange: (customerId: string, seq: number) =>
+    callApi<{ ok: true }>('deleteTrackingRange', { customerId, seq }),
+  reassignTrackingRange: (fromCustomerId: string, toCustomerId: string, seq: number) =>
+    callApi<{ newSeq: number }>('reassignTrackingRange', { fromCustomerId, toCustomerId, seq }),
+};
