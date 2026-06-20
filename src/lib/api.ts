@@ -76,8 +76,19 @@ export interface OrderInput {
   receiverName: string; receiverPhone: string; receiverPincode: string;
   receiverLine1: string; receiverLine2: string; receiverState: string;
 }
-export interface OpenOrder extends Omit<OrderInput, 'clientOrderId'> { orderId: string; trackingId: string; }
+export interface OpenOrder extends Omit<OrderInput, 'clientOrderId'> { orderId: string; trackingId: string; exportedAt?: string; }
 export interface Assignment { clientOrderId: string; trackingId: string; }
+
+// A customer's own order with live lifecycle status (server-backed history).
+export interface OrderRow {
+  orderId: string; batchId: string; trackingId: string; productId: string;
+  receiverName: string; receiverPhone: string; receiverPincode: string;
+  receiverLine1: string; receiverLine2: string; receiverState: string;
+  status: 'labeled' | 'shipped' | 'void' | string;
+  exportedAt: string; shippedAt: string; voidedAt: string; createdAt: string;
+}
+export interface Balance { customerId: string; name: string; remaining: number; low: boolean; }
+export interface Health { orderRows: number; columns: number; orderCells: number; cellLimit: number; warn: boolean; pctOfLimit: number; }
 
 export interface Customer {
   customerId: string; name: string; spreadsheetId?: string;
@@ -113,6 +124,19 @@ export const api = {
   commitShipment: (customerId: string, trackingIds: string[], manifestId?: string) =>
     callApi<{ manifestId: string; marked: string[]; alreadyShipped: string[]; notFound: string[] }>(
       'commitShipment', { customerId, trackingIds, manifestId }),
+  voidOrder: (customerId: string, trackingId: string) =>
+    callApi<{ trackingId: string; alreadyVoid?: boolean }>('voidOrder', { customerId, trackingId }),
+  recordExport: (customerId: string, trackingIds: string[], exportId?: string) =>
+    callApi<{ exportId: string; marked: string[]; alreadyExported: { trackingId: string; exportedAt: string }[]; shipped: string[]; notFound: string[] }>(
+      'recordExport', { customerId, trackingIds, exportId }),
+  listOrders: (customerId: string, limit?: number) =>
+    callApi<{ orders: OrderRow[] }>('listOrders', { customerId, limit }),
+  customerBalance: (customerId: string) =>
+    callApi<{ remaining: number; threshold: number; low: boolean }>('customerBalance', { customerId }),
+  listBalances: () => callApi<{ balances: Balance[]; threshold: number }>('listBalances'),
+  customerHealth: (customerId: string) => callApi<Health & { ok: true }>('customerHealth', { customerId }),
+  archiveOrders: (customerId: string, beforeISO: string) =>
+    callApi<{ moved: number }>('archiveOrders', { customerId, beforeISO }),
 
   // superadmin onboarding
   listCustomers: () => callApi<{ customers: Customer[] }>('listCustomers'),

@@ -6,24 +6,44 @@
 // never the system of record.
 
 import { openDB } from 'idb';
-import type { OrderInput } from './api';
+import type { OrderInput, Product } from './api';
+import type { LabelOrder } from './labels';
 
 export interface PendingOrder extends OrderInput {
   customerId: string;
   createdAt: number;
 }
 
+// A completed, locked batch — kept so the user can view it later and
+// re-download (regenerate) the same labels. Tracking IDs are already issued,
+// so this is a permanent record: never edited, never re-allocated.
+export interface SavedBatch {
+  batchId: string;
+  customerId: string;
+  createdAt: number;
+  count: number;
+  labels: LabelOrder[];
+  products: Product[]; // snapshot at generation time, so re-printing always works
+}
+
 const DB_NAME = 'shipeasy';
 const STORE = 'pending';
-const VERSION = 1;
+const BATCHES = 'batches';
+const VERSION = 2;
 
 let dbp: Promise<any> | null = null;
 function db() {
   if (!dbp) {
     dbp = openDB(DB_NAME, VERSION, {
       upgrade(database) {
-        const store = database.createObjectStore(STORE, { keyPath: 'clientOrderId' });
-        store.createIndex('byCustomer', 'customerId');
+        if (!database.objectStoreNames.contains(STORE)) {
+          const store = database.createObjectStore(STORE, { keyPath: 'clientOrderId' });
+          store.createIndex('byCustomer', 'customerId');
+        }
+        if (!database.objectStoreNames.contains(BATCHES)) {
+          const b = database.createObjectStore(BATCHES, { keyPath: 'batchId' });
+          b.createIndex('byCustomer', 'customerId');
+        }
       },
     });
   }
@@ -57,4 +77,15 @@ export async function clearPending(clientOrderIds: string[]): Promise<void> {
 
 export async function countPending(customerId: string): Promise<number> {
   return (await listPending(customerId)).length;
+}
+
+// --- Saved batches (label history) ---
+
+export async function saveBatch(batch: SavedBatch): Promise<void> {
+  await (await db()).put(BATCHES, batch);
+}
+
+export async function listBatches(customerId: string): Promise<SavedBatch[]> {
+  const all = (await (await db()).getAllFromIndex(BATCHES, 'byCustomer', customerId)) as SavedBatch[];
+  return all.sort((a, b) => b.createdAt - a.createdAt); // newest first
 }
