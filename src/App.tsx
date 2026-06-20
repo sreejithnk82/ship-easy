@@ -61,6 +61,9 @@ const Layout = ({ profile, children, switcher }: { profile: Profile | null; chil
       {isAdmin(profile) && (
         <NavLink to="/scan" className={({ isActive }) => `bottom-nav-item ${isActive ? 'active' : ''}`}><ScanLine size={22} /><span>Scan</span></NavLink>
       )}
+      {profile?.role === 'superadmin' && (
+        <NavLink to="/admin" className={({ isActive }) => `bottom-nav-item ${isActive ? 'active' : ''}`}><ShieldCheck size={22} /><span>Admin</span></NavLink>
+      )}
     </nav>
   </div>
 );
