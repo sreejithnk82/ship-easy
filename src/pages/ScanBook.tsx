@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { ScanLine, FileSpreadsheet, Truck, Check, AlertTriangle, X, Pencil } from 'lucide-react';
+import { ScanLine, FileSpreadsheet, Truck, Check, AlertTriangle, X, Pencil, Ban } from 'lucide-react';
 import { api, Product, OpenOrder } from '../lib/api';
 import { useProfile, isAdmin } from '../lib/profile';
 import { useActiveCustomer } from '../lib/activeCustomer';
@@ -53,10 +53,33 @@ export const ScanBook = () => {
     if (!order) { setFlash({ kind: 'err', text: `Not found / wrong customer: ${id}` }); return; }
     if (scanned.some((s) => s.trackingId === id)) { setFlash({ kind: 'warn', text: `Already scanned: ${id}` }); return; }
     setScanned((prev) => [order, ...prev]);
-    setFlash({ kind: 'ok', text: `Added: ${order.receiverName} (${order.receiverState})` });
+    if (order.exportedAt) {
+      setFlash({ kind: 'warn', text: `Added — ALREADY EXPORTED ${new Date(order.exportedAt).toLocaleDateString()}: ${order.receiverName}` });
+    } else {
+      setFlash({ kind: 'ok', text: `Added: ${order.receiverName} (${order.receiverState})` });
+    }
   };
 
   const removeScan = (id: string) => setScanned((prev) => prev.filter((s) => s.trackingId !== id));
+
+  const voidOrder = async (o: OpenOrder) => {
+    const warn = o.exportedAt
+      ? '\n\nNOTE: this was already exported to DTDC — make sure you did NOT already book it with the courier.'
+      : '';
+    if (!window.confirm(`Void / cancel ${o.receiverName} (${o.trackingId})?\nThe tracking ID is cancelled and never reused.${warn}`)) return;
+    setBusy(true);
+    try {
+      await api.voidOrder(customerId, o.trackingId);
+      setOpenMap((prev) => { const m = new Map(prev); m.delete(o.trackingId); return m; });
+      setScanned((prev) => prev.filter((s) => s.trackingId !== o.trackingId));
+      setFlash({ kind: 'ok', text: `Voided ${o.receiverName}` });
+    } catch (err: any) {
+      const msg = err.code === 'ALREADY_SHIPPED' ? 'Already shipped — cannot void.' : err.message;
+      alert('Void failed: ' + msg);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const startEdit = (o: OpenOrder) => {
     setEditing(o);
@@ -94,8 +117,38 @@ export const ScanBook = () => {
     }
   };
 
-  const exportCsv = () => {
+  const exportCsv = async () => {
     if (scanned.length === 0) { alert('Scan some packets first.'); return; }
+    const ids = scanned.map((s) => s.trackingId);
+
+    // Stamp the orders as exported so the same parcels can't be silently
+    // exported twice (a double courier booking). Warn if any already were.
+    let stamp: Awaited<ReturnType<typeof api.recordExport>> | null = null;
+    setBusy(true);
+    try {
+      stamp = await api.recordExport(customerId, ids);
+    } catch (e: any) {
+      if (!window.confirm('Could not record the export on the server (offline?).\nDownload the file anyway? (re-export protection will not apply)')) { setBusy(false); return; }
+    } finally {
+      setBusy(false);
+    }
+
+    if (stamp && stamp.alreadyExported.length) {
+      const first = stamp.alreadyExported[0];
+      if (!window.confirm(
+        `${stamp.alreadyExported.length} of these parcels were ALREADY exported earlier ` +
+        `(e.g. ${first.trackingId} on ${new Date(first.exportedAt).toLocaleString()}).\n\n` +
+        `Re-exporting risks DOUBLE-BOOKING them with the courier. Download anyway?`
+      )) return;
+    }
+
+    if (stamp) {
+      const now = new Date().toISOString();
+      const marked = new Set(stamp.marked);
+      setOpenMap((prev) => { const m = new Map(prev); marked.forEach((id) => { const o = m.get(id); if (o) m.set(id, { ...o, exportedAt: now }); }); return m; });
+      setScanned((prev) => prev.map((s) => (marked.has(s.trackingId) ? { ...s, exportedAt: now } : s)));
+    }
+
     const rows: DtdcOrder[] = scanned.map((s) => ({
       trackingId: s.trackingId, productId: s.productId,
       receiverName: s.receiverName, receiverPhone: s.receiverPhone,
@@ -182,12 +235,14 @@ export const ScanBook = () => {
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <strong>{s.receiverName}</strong>
                   <div style={{ display: 'flex', gap: '0.5rem' }}>
-                    <button onClick={() => startEdit(s)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--primary-color)' }}><Pencil size={16} /></button>
-                    <button onClick={() => removeScan(s.trackingId)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger-color)' }}><X size={18} /></button>
+                    <button title="Edit" onClick={() => startEdit(s)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--primary-color)' }}><Pencil size={16} /></button>
+                    <button title="Void / cancel" onClick={() => voidOrder(s)} disabled={busy} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger-color)' }}><Ban size={16} /></button>
+                    <button title="Remove from this scan" onClick={() => removeScan(s.trackingId)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)' }}><X size={18} /></button>
                   </div>
                 </div>
                 <p style={{ margin: '0.25rem 0', fontFamily: 'monospace', fontSize: '0.85rem' }}>{s.trackingId}</p>
                 <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{s.receiverPincode} · {s.receiverState}</p>
+                {s.exportedAt && <span className="badge badge-processing" style={{ marginTop: '0.4rem', display: 'inline-block' }}>already exported</span>}
               </div>
             ))}
           </div>

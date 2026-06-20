@@ -1,18 +1,26 @@
 import { useState, useEffect } from 'react';
 import {
   ShieldCheck, Building2, UserPlus, Hash, ExternalLink, Save, Truck,
-  Pencil, Trash2, Pause, Play, ArrowRightLeft, X,
+  Pencil, Trash2, Pause, Play, ArrowRightLeft, X, Activity, Database, Archive,
 } from 'lucide-react';
-import { api, Customer, UserRow, TrackingRange, HubCode, ApiError } from '../lib/api';
+import { api, Customer, UserRow, TrackingRange, HubCode, Balance, Health, ApiError } from '../lib/api';
 import { useProfile } from '../lib/profile';
 
-type Tab = 'customers' | 'users' | 'hubs' | 'ranges';
+type Tab = 'customers' | 'users' | 'hubs' | 'ranges' | 'health';
 const TABS: { k: Tab; label: string }[] = [
   { k: 'customers', label: 'Customers' },
   { k: 'users', label: 'Users' },
   { k: 'hubs', label: 'Hub Codes' },
   { k: 'ranges', label: 'Tracking IDs' },
+  { k: 'health', label: 'Health' },
 ];
+
+// Default archive cutoff: 12 months ago, as a yyyy-mm-dd string for <input type=date>.
+function yearAgoISODate(): string {
+  const d = new Date();
+  d.setFullYear(d.getFullYear() - 1);
+  return d.toISOString().slice(0, 10);
+}
 
 export const SuperAdmin = () => {
   const profile = useProfile();
@@ -35,7 +43,37 @@ export const SuperAdmin = () => {
   const [reassign, setReassign] = useState<TrackingRange | null>(null);
   const [reassignTo, setReassignTo] = useState('');
 
+  // health tab
+  const [balances, setBalances] = useState<Balance[] | null>(null);
+  const [healthCustomer, setHealthCustomer] = useState('');
+  const [health, setHealth] = useState<Health | null>(null);
+  const [archiveBefore, setArchiveBefore] = useState(yearAgoISODate());
+
   useEffect(() => { load(); }, []);
+
+  useEffect(() => { if (tab === 'health' && balances === null) loadBalances(); }, [tab]);
+
+  const loadBalances = async () => {
+    try { setBalances((await api.listBalances()).balances); } catch (e: any) { alert('Balances failed: ' + e.message); }
+  };
+
+  const loadHealth = async (customerId: string) => {
+    setHealthCustomer(customerId); setHealth(null);
+    if (!customerId) return;
+    try { setHealth(await api.customerHealth(customerId)); } catch (e: any) { alert('Health failed: ' + e.message); }
+  };
+
+  const doArchive = async () => {
+    if (!healthCustomer) { alert('Pick a customer first.'); return; }
+    if (!window.confirm(`Move shipped/cancelled orders before ${archiveBefore} into the archive sheet? Open orders are never touched.`)) return;
+    setBusy(true);
+    try {
+      const beforeISO = new Date(archiveBefore + 'T00:00:00Z').toISOString();
+      const { moved } = await api.archiveOrders(healthCustomer, beforeISO);
+      alert(`Archived ${moved} order(s).`);
+      loadHealth(healthCustomer);
+    } catch (e: any) { alert('Archive failed: ' + e.message); } finally { setBusy(false); }
+  };
 
   const load = async () => {
     try {
@@ -278,6 +316,56 @@ export const SuperAdmin = () => {
               </div>
             </>
           )}
+        </div>
+      )}
+
+      {/* HEALTH */}
+      {tab === 'health' && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 340px), 1fr))', gap: '1.5rem' }}>
+          <div className="glass-card">
+            <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: 0 }}><Activity size={20} /> Tracking ID Balances</h3>
+            <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: 0 }}>Customers low on IDs are flagged — top up their ranges before they run out.</p>
+            {balances === null ? <p style={{ color: 'var(--text-secondary)' }}>Loading…</p> : (
+              <div style={{ fontSize: '0.9rem' }}>
+                {[...balances].sort((a, b) => a.remaining - b.remaining).map((b) => (
+                  <div key={b.customerId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.4rem 0', borderBottom: '1px solid var(--border-color)' }}>
+                    <span>{b.name} <span className="badge badge-gray">{b.customerId}</span></span>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <strong>{b.remaining < 0 ? '—' : b.remaining}</strong>
+                      {b.low && <span className="badge badge-processing">LOW</span>}
+                    </span>
+                  </div>
+                ))}
+                {balances.length === 0 && <div style={{ color: 'var(--text-secondary)' }}>No customers yet.</div>}
+              </div>
+            )}
+          </div>
+
+          <div className="glass-card">
+            <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: 0 }}><Database size={20} /> Storage & Archive</h3>
+            <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: 0 }}>Google Sheets caps each customer at 10M cells. Archive old shipped/cancelled orders to keep the live sheet fast and well under the limit.</p>
+            <div className="input-group">
+              <label className="input-label">Customer</label>
+              <select className="input-field" value={healthCustomer} onChange={(e) => loadHealth(e.target.value)}>
+                <option value="">— choose a customer —</option>
+                {customers.map((c) => <option key={c.customerId} value={c.customerId}>{c.name} ({c.customerId})</option>)}
+              </select>
+            </div>
+            {health && (
+              <>
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', margin: '0.5rem 0 1rem' }}>
+                  <span className="badge badge-gray">{health.orderRows.toLocaleString()} order rows</span>
+                  <span className="badge badge-gray">{health.orderCells.toLocaleString()} cells</span>
+                  <span className={`badge ${health.warn ? 'badge-processing' : 'badge-completed'}`}>{health.pctOfLimit}% of limit</span>
+                </div>
+                <div className="input-group">
+                  <label className="input-label">Archive orders shipped/cancelled before</label>
+                  <input className="input-field" type="date" value={archiveBefore} onChange={(e) => setArchiveBefore(e.target.value)} />
+                </div>
+                <button className="btn btn-outline" onClick={doArchive} disabled={busy}><Archive size={16} /> {busy ? 'Archiving…' : 'Archive old orders'}</button>
+              </>
+            )}
+          </div>
         </div>
       )}
 

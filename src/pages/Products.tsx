@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Package, Save, Plus, X, Pencil, Trash2 } from 'lucide-react';
 import { api, Product, HubCode } from '../lib/api';
 import { ApiError } from '../lib/api';
-import { useProfile, isAdmin } from '../lib/profile';
+import { useProfile } from '../lib/profile';
 import { useActiveCustomer } from '../lib/activeCustomer';
 
 const EMPTY = {
@@ -18,7 +18,7 @@ export const Products = () => {
   const profile = useProfile();
   const { activeId } = useActiveCustomer();
   const customerId = profile?.customerId || activeId;
-  const admin = isAdmin(profile);
+  const admin = profile?.role === 'superadmin'; // only superadmins manage products
   const [products, setProducts] = useState<Product[]>([]);
   const [hubCodes, setHubCodes] = useState<HubCode[]>([]);
   const [loading, setLoading] = useState(true);
