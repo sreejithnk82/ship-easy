@@ -7,6 +7,7 @@ import jsPDF from 'jspdf';
 import JsBarcode from 'jsbarcode';
 import type { Product } from './api';
 import { triggerDownload } from './dtdc';
+import { istDayKey } from './datetime';
 
 export interface LabelOrder {
   trackingId: string;
@@ -106,5 +107,5 @@ function wrapY(doc: jsPDF, text: string, x: number, y: number, maxW: number, lh:
 
 export function downloadLabels(orders: LabelOrder[], products: Product[], filename?: string) {
   const blob = buildLabelsPdf(orders, products);
-  triggerDownload(blob, filename || `labels_${new Date().toISOString().slice(0, 10)}.pdf`);
+  triggerDownload(blob, filename || `labels_${istDayKey(new Date())}.pdf`);
 }

@@ -59,11 +59,22 @@ export interface Sender {
   senderState: string; senderEmail: string; hubCustomerCode: string;
 }
 export interface Profile { email: string; role: string; customerId: string; customer?: Sender; }
+// A reusable "From" address. Products reference one by id; the server resolves
+// the sender block live, so editing an address updates every product using it.
+export interface SenderAddress {
+  addressId: string;
+  label: string;
+  senderName: string; senderPhone: string;
+  senderAddr1: string; senderAddr2: string;
+  senderCity: string; senderState: string;
+  senderPincode: string; senderEmail: string;
+}
 export interface Product {
   productId: string;
   productCode: string;
   name: string;
   hubCustomerCode: string;
+  senderAddressId: string;
   senderName: string; senderPhone: string; senderAddr1: string; senderAddr2: string;
   senderCity: string; senderState: string; senderPincode: string; senderEmail: string;
   content: string;
@@ -112,6 +123,14 @@ export const api = {
     callApi<{ changed: number }>('updateProduct', { productId, product, customerId }),
   deleteProduct: (productId: string, customerId?: string) =>
     callApi<{ ok: true }>('deleteProduct', { productId, customerId }),
+  listSenderAddresses: (customerId?: string) =>
+    callApi<{ addresses: SenderAddress[] }>('listSenderAddresses', { customerId }),
+  addSenderAddress: (address: Partial<SenderAddress>, customerId?: string) =>
+    callApi<{ addressId: string }>('addSenderAddress', { address, customerId }),
+  updateSenderAddress: (addressId: string, address: Partial<SenderAddress>, customerId?: string) =>
+    callApi<{ changed: number }>('updateSenderAddress', { addressId, address, customerId }),
+  deleteSenderAddress: (addressId: string, customerId?: string) =>
+    callApi<{ ok: true }>('deleteSenderAddress', { addressId, customerId }),
   generateLabels: (customerId: string, idempotencyKey: string, orders: OrderInput[]) =>
     callApi<{ batchId: string; count: number; assignments: Assignment[] }>(
       'generateLabels', { customerId, idempotencyKey, orders }),

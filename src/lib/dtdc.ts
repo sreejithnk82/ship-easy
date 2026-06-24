@@ -8,6 +8,7 @@
 import * as XLSX from 'xlsx';
 import type { Product } from './api';
 import { stateFromPincode } from './pincode';
+import { istDayKey } from './datetime';
 
 // Exact header text + order from the DTDC sample. Do not reword.
 export const DTDC_HEADERS: string[] = [
@@ -106,7 +107,7 @@ export function buildDtdcWorkbook(orders: DtdcOrder[], products: Product[]): Blo
 /** Trigger a browser download of the DTDC workbook. */
 export function downloadDtdc(orders: DtdcOrder[], products: Product[], filename?: string) {
   const blob = buildDtdcWorkbook(orders, products);
-  const name = filename || `ScannedItems_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.xlsx`;
+  const name = filename || `ScannedItems_${istDayKey(new Date()).replace(/-/g, '')}.xlsx`;
   triggerDownload(blob, name);
 }
 
