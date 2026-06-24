@@ -1,6 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App.tsx';
+import { ToastProvider, ConfirmProvider } from './components/feedback';
 import './index.css';
 
 // Global error handler for mobile debugging
@@ -21,6 +22,10 @@ window.onerror = (msg, url, lineNo) => {
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <App />
+    <ToastProvider>
+      <ConfirmProvider>
+        <App />
+      </ConfirmProvider>
+    </ToastProvider>
   </React.StrictMode>,
 );

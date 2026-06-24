@@ -1,15 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { HashRouter, Routes, Route, Navigate, NavLink } from 'react-router-dom';
-import { Package, PackagePlus, ScanLine, LogOut, ShieldCheck } from 'lucide-react';
+import { Package, PackagePlus, ScanLine, LogOut, ShieldCheck, MapPin, History as HistoryIcon } from 'lucide-react';
 import { initAuth, onAuthChange, getEmail, signOut } from './lib/auth';
 import { api, Profile, Customer } from './lib/api';
 import { ApiError } from './lib/api';
-import { ProfileContext, isAdmin } from './lib/profile';
+import { ProfileContext, isOperator, canScan } from './lib/profile';
 import { ActiveCustomerContext, ACTIVE_CUSTOMER_KEY } from './lib/activeCustomer';
 import { Login } from './pages/Login';
 import { AddOrder } from './pages/AddOrder';
 import { Products } from './pages/Products';
 import { ScanBook } from './pages/ScanBook';
+import { History } from './pages/History';
+import { Addresses } from './pages/Addresses';
 import { SuperAdmin } from './pages/SuperAdmin';
 import { ContactAdmin } from './pages/ContactAdmin';
 import { ReloadPrompt } from './ReloadPrompt';
@@ -20,13 +22,27 @@ const Brand = () => (
 
 const NavItems = ({ profile }: { profile: Profile | null }) => (
   <>
-    <NavLink to="/book" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-      <PackagePlus size={20} /> Book Orders
-    </NavLink>
-    <NavLink to="/products" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-      <Package size={20} /> Products
-    </NavLink>
-    {isAdmin(profile) && (
+    {!isOperator(profile) && (
+      <NavLink to="/book" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+        <PackagePlus size={20} /> Book Orders
+      </NavLink>
+    )}
+    {!isOperator(profile) && (
+      <NavLink to="/products" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+        <Package size={20} /> Products
+      </NavLink>
+    )}
+    {!isOperator(profile) && (
+      <NavLink to="/history" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+        <HistoryIcon size={20} /> Label History
+      </NavLink>
+    )}
+    {profile?.role === 'superadmin' && (
+      <NavLink to="/addresses" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+        <MapPin size={20} /> Addresses
+      </NavLink>
+    )}
+    {canScan(profile) && (
       <NavLink to="/scan" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
         <ScanLine size={20} /> Scan &amp; Book
       </NavLink>
@@ -56,9 +72,16 @@ const Layout = ({ profile, children, switcher }: { profile: Profile | null; chil
     </aside>
     <main className="main-content"><div className="slide-up">{switcher}{children}</div></main>
     <nav className="bottom-nav">
-      <NavLink to="/book" className={({ isActive }) => `bottom-nav-item ${isActive ? 'active' : ''}`}><PackagePlus size={22} /><span>Book</span></NavLink>
-      <NavLink to="/products" className={({ isActive }) => `bottom-nav-item ${isActive ? 'active' : ''}`}><Package size={22} /><span>Items</span></NavLink>
-      {isAdmin(profile) && (
+      {!isOperator(profile) && (
+        <NavLink to="/book" className={({ isActive }) => `bottom-nav-item ${isActive ? 'active' : ''}`}><PackagePlus size={22} /><span>Book</span></NavLink>
+      )}
+      {!isOperator(profile) && (
+        <NavLink to="/products" className={({ isActive }) => `bottom-nav-item ${isActive ? 'active' : ''}`}><Package size={22} /><span>Items</span></NavLink>
+      )}
+      {!isOperator(profile) && (
+        <NavLink to="/history" className={({ isActive }) => `bottom-nav-item ${isActive ? 'active' : ''}`}><HistoryIcon size={22} /><span>History</span></NavLink>
+      )}
+      {canScan(profile) && (
         <NavLink to="/scan" className={({ isActive }) => `bottom-nav-item ${isActive ? 'active' : ''}`}><ScanLine size={22} /><span>Scan</span></NavLink>
       )}
       {profile?.role === 'superadmin' && (
@@ -142,13 +165,23 @@ const App = () => {
       <ActiveCustomerContext.Provider value={{ activeId, setActiveId }}>
         <HashRouter>
           <ReloadPrompt />
-          <Routes>
-            <Route path="/book" element={<Layout profile={profile} switcher={switcher}><AddOrder /></Layout>} />
-            <Route path="/products" element={<Layout profile={profile} switcher={switcher}><Products /></Layout>} />
-            <Route path="/scan" element={<Layout profile={profile} switcher={switcher}><ScanBook /></Layout>} />
-            <Route path="/admin" element={<Layout profile={profile}><SuperAdmin /></Layout>} />
-            <Route path="*" element={<Navigate to="/book" replace />} />
-          </Routes>
+          {isOperator(profile) ? (
+            // Operators are scoped to the Scan page only; everything else redirects.
+            <Routes>
+              <Route path="/scan" element={<Layout profile={profile}><ScanBook /></Layout>} />
+              <Route path="*" element={<Navigate to="/scan" replace />} />
+            </Routes>
+          ) : (
+            <Routes>
+              <Route path="/book" element={<Layout profile={profile} switcher={switcher}><AddOrder /></Layout>} />
+              <Route path="/products" element={<Layout profile={profile} switcher={switcher}><Products /></Layout>} />
+              <Route path="/history" element={<Layout profile={profile} switcher={switcher}><History /></Layout>} />
+              <Route path="/addresses" element={<Layout profile={profile} switcher={switcher}><Addresses /></Layout>} />
+              <Route path="/scan" element={<Layout profile={profile} switcher={switcher}><ScanBook /></Layout>} />
+              <Route path="/admin" element={<Layout profile={profile}><SuperAdmin /></Layout>} />
+              <Route path="*" element={<Navigate to="/book" replace />} />
+            </Routes>
+          )}
         </HashRouter>
       </ActiveCustomerContext.Provider>
     </ProfileContext.Provider>
