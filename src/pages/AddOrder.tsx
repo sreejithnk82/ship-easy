@@ -1,18 +1,17 @@
 import { useState, useEffect } from 'react';
-import { Wand2, Save, AlertCircle, Package, Printer, Trash2, Pencil, WifiOff, History, Download, ChevronDown, ChevronRight } from 'lucide-react';
+import { Wand2, Save, AlertCircle, Package, Printer, Trash2, Pencil, WifiOff } from 'lucide-react';
 import { parseRawAddress } from '../lib/parser';
-import { api, Product, OrderInput, OrderRow } from '../lib/api';
-import { LabelOrder } from '../lib/labels';
+import { api, Product, OrderInput } from '../lib/api';
 import { ApiError } from '../lib/api';
 import { useProfile } from '../lib/profile';
 import { useActiveCustomer } from '../lib/activeCustomer';
 import { stateFromPincode, isValidPincode } from '../lib/pincode';
 import {
   addPending, listPending, deletePending, clearPending,
-  newClientOrderId, PendingOrder,
-  saveBatch, listBatches, SavedBatch,
+  newClientOrderId, PendingOrder, saveBatch,
 } from '../lib/outbox';
 import { downloadLabels } from '../lib/labels';
+import { useToast, useConfirm } from '../components/feedback';
 
 const EMPTY = { name: '', phone: '', pincode: '', line1: '', line2: '', state: '', productId: '' };
 
@@ -20,40 +19,41 @@ export const AddOrder = () => {
   const profile = useProfile();
   const { activeId } = useActiveCustomer();
   const customerId = profile?.customerId || activeId;
+  const notify = useToast();
+  const confirm = useConfirm();
 
   const [products, setProducts] = useState<Product[]>([]);
   const [pending, setPending] = useState<PendingOrder[]>([]);
-  const [localBatches, setLocalBatches] = useState<SavedBatch[]>([]);
-  const [serverOrders, setServerOrders] = useState<OrderRow[] | null>(null); // null = couldn't load (offline)
   const [balance, setBalance] = useState<{ remaining: number; low: boolean } | null>(null);
-  const [openBatch, setOpenBatch] = useState<string | null>(null);
   const [raw, setRaw] = useState('');
   const [f, setF] = useState({ ...EMPTY });
   const [adding, setAdding] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
+  const [loadingProducts, setLoadingProducts] = useState(true);
+  const [loadingBalance, setLoadingBalance] = useState(true);
 
-  useEffect(() => { if (customerId) { loadProducts(); refresh(); refreshHistory(); } }, [customerId]);
+  useEffect(() => { if (customerId) { loadProducts(); refresh(); refreshBalance(); } }, [customerId]);
 
   const loadProducts = async () => {
+    setLoadingProducts(true);
     try { setProducts((await api.listProducts(customerId)).products); }
     catch (e: any) { console.error(e); }
+    finally { setLoadingProducts(false); }
   };
   const refresh = async () => setPending(await listPending(customerId));
 
-  // History is server-backed (survives a new device / cleared browser) and shows
-  // live status. We fall back to the local IndexedDB cache when offline.
-  const refreshHistory = async () => {
-    setLocalBatches(await listBatches(customerId));
+  // Remaining tracking IDs (for the count + the generate guard). Best-effort:
+  // stays null when offline.
+  const refreshBalance = async () => {
+    setLoadingBalance(true);
     try {
-      const [{ orders }, bal] = await Promise.all([
-        api.listOrders(customerId, 400),
-        api.customerBalance(customerId).catch(() => null),
-      ]);
-      setServerOrders(orders);
-      if (bal) setBalance({ remaining: bal.remaining, low: bal.low });
+      const bal = await api.customerBalance(customerId);
+      setBalance({ remaining: bal.remaining, low: bal.low });
     } catch {
-      setServerOrders(null); // offline → render the local cache instead
+      /* offline — leave balance as-is */
+    } finally {
+      setLoadingBalance(false);
     }
   };
 
@@ -74,9 +74,9 @@ export const AddOrder = () => {
   };
 
   const addToStack = async () => {
-    if (!f.name || !f.phone || !f.line1 || !f.line2) { alert('Name, phone, and both address lines are required.'); return; }
-    if (!isValidPincode(f.pincode)) { alert('Enter a valid 6-digit pincode.'); return; }
-    if (!f.productId) { alert('Select a product.'); return; }
+    if (!f.name || !f.phone || !f.line1 || !f.line2) { notify('Name, phone, and both address lines are required.', 'error'); return; }
+    if (!isValidPincode(f.pincode)) { notify('Enter a valid 6-digit pincode.', 'error'); return; }
+    if (!f.productId) { notify('Select a product.', 'error'); return; }
 
     const existing = editId ? pending.find((p) => p.clientOrderId === editId) : null;
     const order: PendingOrder = {
@@ -107,13 +107,18 @@ export const AddOrder = () => {
   };
 
   const removeOne = async (id: string, name: string) => {
-    if (!window.confirm(`Remove order for ${name}?`)) return;
+    if (!(await confirm({ title: 'Remove order', message: <>Remove the order for <strong>{name}</strong> from your active orders?</>, confirmLabel: 'Remove', requireCode: true }))) return;
     if (editId === id) { setEditId(null); setF({ ...EMPTY }); }
     await deletePending(id); refresh();
   };
 
   const generate = async () => {
-    if (pending.length === 0) { alert('Add some orders first.'); return; }
+    if (pending.length === 0) { notify('Add some orders first.', 'error'); return; }
+    // Block before hitting the server when we already know there aren't enough IDs.
+    if (balance && balance.remaining < pending.length) {
+      notify(`Not enough tracking IDs: ${balance.remaining} left but ${pending.length} needed. Ask your admin to top up before generating.`, 'error');
+      return;
+    }
     setGenerating(true);
     const key = getBatchKey();
     const orders: OrderInput[] = pending.map((p) => ({
@@ -147,52 +152,20 @@ export const AddOrder = () => {
       await clearPending(pending.map((p) => p.clientOrderId));
       localStorage.removeItem(keyName);
       refresh();
-      refreshHistory();
-      alert(`Generated ${res.assignments.length} labels (batch ${res.batchId.slice(0, 8)}).`);
+      refreshBalance();
+      notify(`Generated ${res.assignments.length} labels (batch ${res.batchId.slice(0, 8)}). See them under Label History.`, 'success');
     } catch (e) {
       if (e instanceof ApiError && e.code === 'INSUFFICIENT_IDS') {
-        alert(`Not enough tracking IDs left (only ${e.available} available). Ask admin to top up.`);
+        notify(`Not enough tracking IDs left (only ${e.available} available). Ask admin to top up.`, 'error');
       } else {
-        alert('Generate failed: ' + (e as Error).message + '\nYour stack is kept — you can retry.');
+        notify('Generate failed: ' + (e as Error).message + '\nYour active orders are kept — you can retry.', 'error');
       }
     } finally {
       setGenerating(false);
     }
   };
 
-  // A batch as the UI needs it, built from either the server (with live status,
-  // preferred) or the local IndexedDB cache (offline fallback).
-  type UiLabel = LabelOrder & { status?: string };
-  type UiBatch = { batchId: string; createdAt: number; labels: UiLabel[]; products: Product[] };
-
-  let uiBatches: UiBatch[];
-  if (serverOrders !== null) {
-    const byBatch = new Map<string, UiBatch>();
-    for (const o of serverOrders) {
-      const id = o.batchId || o.orderId;
-      let b = byBatch.get(id);
-      if (!b) { b = { batchId: id, createdAt: Date.parse(o.createdAt) || 0, labels: [], products }; byBatch.set(id, b); }
-      b.labels.push({
-        trackingId: o.trackingId, productId: o.productId, status: o.status,
-        receiverName: o.receiverName, receiverPhone: o.receiverPhone, receiverPincode: o.receiverPincode,
-        receiverLine1: o.receiverLine1, receiverLine2: o.receiverLine2,
-      });
-    }
-    uiBatches = [...byBatch.values()].sort((a, b) => b.createdAt - a.createdAt);
-  } else {
-    uiBatches = localBatches.map((b) => ({ batchId: b.batchId, createdAt: b.createdAt, labels: b.labels, products: b.products }));
-  }
-
-  const regenerate = (b: UiBatch) =>
-    downloadLabels(b.labels, b.products, `labels_${b.batchId.slice(0, 8)}.pdf`);
-
-  // Group batches by local calendar day (newest-first).
-  const groups: { day: string; items: UiBatch[] }[] = [];
-  for (const b of uiBatches) {
-    const day = new Date(b.createdAt).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
-    const g = groups.find((x) => x.day === day);
-    if (g) g.items.push(b); else groups.push({ day, items: [b] });
-  }
+  const productById = new Map(products.map((p) => [p.productId, p]));
 
   if (!customerId) {
     return <div><h1 className="page-title">Book Orders</h1>
@@ -208,17 +181,21 @@ export const AddOrder = () => {
         </button>
       </div>
 
-      {products.length === 0 && (
+      {loadingProducts ? (
+        <div style={{ padding: '1rem', marginBottom: '1.5rem', color: 'var(--text-secondary)' }}>Loading products…</div>
+      ) : products.length === 0 ? (
         <div style={{ padding: '1rem', marginBottom: '1.5rem', background: 'rgba(245,158,11,0.1)', border: '1px solid var(--warning-color)', borderRadius: 'var(--radius-lg)', color: 'var(--warning-color)', display: 'flex', alignItems: 'center', gap: '1rem' }}>
           <AlertCircle size={24} /> <span>No products yet — add one under Products before booking.</span>
         </div>
-      )}
+      ) : null}
 
-      {balance?.low && (
-        <div style={{ padding: '1rem', marginBottom: '1.5rem', background: 'rgba(239,68,68,0.1)', border: '1px solid var(--danger-color)', borderRadius: 'var(--radius-lg)', color: 'var(--danger-color)', display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          <AlertCircle size={24} /> <span>Only <strong>{balance.remaining}</strong> tracking IDs left — ask your admin to top up before they run out.</span>
+      {balance ? (
+        <div style={{ marginBottom: '1.5rem', fontWeight: 600, color: balance.remaining < pending.length + 10 ? 'var(--danger-color)' : 'var(--text-secondary)' }}>
+          Tracking IDs left: {balance.remaining}
         </div>
-      )}
+      ) : loadingBalance ? (
+        <div style={{ marginBottom: '1.5rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Tracking IDs left: …</div>
+      ) : null}
 
       {adding && (
         <div className="glass-card slide-up" style={{ marginBottom: '1.5rem' }}>
@@ -246,20 +223,20 @@ export const AddOrder = () => {
           </div>
 
           <button className="btn btn-primary" onClick={addToStack} style={{ width: '100%' }}>
-            <Save size={18} /> {editId ? 'Update Order' : 'Add to Stack'}
+            <Save size={18} /> {editId ? 'Update Order' : 'Add Order'}
           </button>
         </div>
       )}
 
       <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-secondary)', margin: '0 0 1rem' }}>
-        Current Stack ({pending.length})
+        Active Orders ({pending.length})
         <span title="Saved locally; syncs on Generate Labels" style={{ display: 'inline-flex' }}><WifiOff size={14} /></span>
       </h3>
 
       {pending.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--text-secondary)' }}>
           <Package size={48} style={{ opacity: 0.2, margin: '0 auto 1rem' }} />
-          <p>Your stack is empty.</p>
+          <p>No active orders yet.</p>
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem' }}>
@@ -274,70 +251,31 @@ export const AddOrder = () => {
               </div>
               <p style={{ margin: '0.25rem 0', fontSize: '0.9rem' }}>{o.receiverPhone} · {o.receiverPincode} · {o.receiverState}</p>
               <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{o.receiverLine1}, {o.receiverLine2}</p>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {pending.length > 0 && (
-        <div style={{ marginTop: '2rem', textAlign: 'center' }}>
-          <button onClick={generate} disabled={generating} className="btn btn-primary" style={{ width: '100%', maxWidth: '340px', background: '#10b981', padding: '1rem' }}>
-            <Printer size={18} /> {generating ? 'Generating…' : `Generate ${pending.length} Labels`}
-          </button>
-        </div>
-      )}
-
-      {uiBatches.length > 0 && (
-        <div style={{ marginTop: '2.5rem' }}>
-          <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-secondary)', margin: '0 0 1rem' }}>
-            <History size={18} /> Label History
-            {serverOrders === null && <span title="Offline — showing this device's cache" style={{ display: 'inline-flex' }}><WifiOff size={14} /></span>}
-          </h3>
-          {groups.map((g) => (
-            <div key={g.day} style={{ marginBottom: '1.5rem' }}>
-              <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em', margin: '0 0 0.5rem' }}>{g.day}</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                {g.items.map((b) => {
-                  const expanded = openBatch === b.batchId;
-                  const time = new Date(b.createdAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-                  const n = b.labels.length;
-                  const shipped = b.labels.filter((l) => l.status === 'shipped').length;
-                  const voided = b.labels.filter((l) => l.status === 'void').length;
-                  return (
-                    <div key={b.batchId} className="glass-card" style={{ padding: '0.75rem 1rem' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-                        <button onClick={() => setOpenBatch(expanded ? null : b.batchId)} style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', padding: 0, flex: 1, textAlign: 'left' }}>
-                          {expanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
-                          <span style={{ fontWeight: 600 }}>{n} label{n === 1 ? '' : 's'}</span>
-                          <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>· {time} · #{b.batchId.slice(0, 8)}</span>
-                          {shipped > 0 && <span className="badge badge-completed">{shipped} shipped</span>}
-                          {voided > 0 && <span className="badge badge-gray">{voided} void</span>}
-                        </button>
-                        <button className="btn btn-outline" onClick={() => regenerate(b)} style={{ width: 'auto', padding: '0.4rem 0.75rem', fontSize: '0.85rem' }}>
-                          <Download size={15} /> Labels
-                        </button>
-                      </div>
-                      {expanded && (
-                        <div style={{ marginTop: '0.75rem', borderTop: '1px solid var(--border-color)', paddingTop: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-                          {b.labels.map((l) => (
-                            <div key={l.trackingId} style={{ fontSize: '0.82rem', display: 'flex', justifyContent: 'space-between', gap: '0.75rem', alignItems: 'center' }}>
-                              <span style={{ color: 'var(--text-secondary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.receiverName}</span>
-                              {l.status && l.status !== 'labeled' && (
-                                <span className={`badge ${l.status === 'shipped' ? 'badge-completed' : 'badge-gray'}`}>{l.status}</span>
-                              )}
-                              <span style={{ fontFamily: 'monospace', fontWeight: 600, textDecoration: l.status === 'void' ? 'line-through' : 'none' }}>{l.trackingId}</span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+              <div style={{ marginTop: '0.5rem' }}>
+                <span className="badge badge-primary" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
+                  <Package size={13} /> {productById.get(o.productId)?.name || 'Unknown product'}
+                </span>
               </div>
             </div>
           ))}
         </div>
       )}
+
+      {pending.length > 0 && (() => {
+        const notEnough = balance !== null && balance.remaining < pending.length;
+        return (
+          <div style={{ marginTop: '2rem', textAlign: 'center' }}>
+            <button onClick={generate} disabled={generating || notEnough} className="btn btn-primary" style={{ width: '100%', maxWidth: '340px', background: notEnough ? '#9ca3af' : '#10b981', padding: '1rem' }}>
+              <Printer size={18} /> {generating ? 'Generating…' : `Generate ${pending.length} Labels`}
+            </button>
+            {notEnough && (
+              <p style={{ color: 'var(--danger-color)', marginTop: '0.5rem', fontSize: '0.85rem', fontWeight: 600 }}>
+                Not enough tracking IDs: {balance!.remaining} left, {pending.length} needed. Ask your admin to top up.
+              </p>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 };

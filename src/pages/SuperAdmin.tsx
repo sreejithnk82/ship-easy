@@ -5,6 +5,8 @@ import {
 } from 'lucide-react';
 import { api, Customer, UserRow, TrackingRange, HubCode, Balance, Health, ApiError } from '../lib/api';
 import { useProfile } from '../lib/profile';
+import { useToast, useConfirm } from '../components/feedback';
+import { istDayKey } from '../lib/datetime';
 
 type Tab = 'customers' | 'users' | 'hubs' | 'ranges' | 'health';
 const TABS: { k: Tab; label: string }[] = [
@@ -15,20 +17,23 @@ const TABS: { k: Tab; label: string }[] = [
   { k: 'health', label: 'Health' },
 ];
 
-// Default archive cutoff: 12 months ago, as a yyyy-mm-dd string for <input type=date>.
+// Default archive cutoff: 12 months ago, as a yyyy-mm-dd (IST) string for <input type=date>.
 function yearAgoISODate(): string {
   const d = new Date();
   d.setFullYear(d.getFullYear() - 1);
-  return d.toISOString().slice(0, 10);
+  return istDayKey(d);
 }
 
 export const SuperAdmin = () => {
   const profile = useProfile();
+  const notify = useToast();
+  const confirm = useConfirm();
   const [tab, setTab] = useState<Tab>('customers');
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [users, setUsers] = useState<UserRow[]>([]);
   const [hubCodes, setHubCodes] = useState<HubCode[]>([]);
   const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   const [cust, setCust] = useState({ customerId: '', name: '', senderName: '', senderPhone: '', senderAddr1: '', senderAddr2: '', senderCity: '', senderState: '', senderPincode: '', senderEmail: '', hubCustomerCode: '' });
   const [user, setUser] = useState({ email: '', customerId: '', role: 'member' });
@@ -37,6 +42,7 @@ export const SuperAdmin = () => {
   // ranges
   const [rangeCustomer, setRangeCustomer] = useState('');
   const [ranges, setRanges] = useState<TrackingRange[]>([]);
+  const [loadingRanges, setLoadingRanges] = useState(false);
   const [rangeForm, setRangeForm] = useState({ prefix: 'R', start: '', end: '', pad: '' });
   const [editRange, setEditRange] = useState<TrackingRange | null>(null);
   const [editForm, setEditForm] = useState({ prefix: '', start: '', end: '', pad: '' });
@@ -47,6 +53,7 @@ export const SuperAdmin = () => {
   const [balances, setBalances] = useState<Balance[] | null>(null);
   const [healthCustomer, setHealthCustomer] = useState('');
   const [health, setHealth] = useState<Health | null>(null);
+  const [loadingHealth, setLoadingHealth] = useState(false);
   const [archiveBefore, setArchiveBefore] = useState(yearAgoISODate());
 
   useEffect(() => { load(); }, []);
@@ -54,80 +61,86 @@ export const SuperAdmin = () => {
   useEffect(() => { if (tab === 'health' && balances === null) loadBalances(); }, [tab]);
 
   const loadBalances = async () => {
-    try { setBalances((await api.listBalances()).balances); } catch (e: any) { alert('Balances failed: ' + e.message); }
+    try { setBalances((await api.listBalances()).balances); } catch (e: any) { notify('Balances failed: ' + e.message, 'error'); }
   };
 
   const loadHealth = async (customerId: string) => {
     setHealthCustomer(customerId); setHealth(null);
     if (!customerId) return;
-    try { setHealth(await api.customerHealth(customerId)); } catch (e: any) { alert('Health failed: ' + e.message); }
+    setLoadingHealth(true);
+    try { setHealth(await api.customerHealth(customerId)); } catch (e: any) { notify('Health failed: ' + e.message, 'error'); }
+    finally { setLoadingHealth(false); }
   };
 
   const doArchive = async () => {
-    if (!healthCustomer) { alert('Pick a customer first.'); return; }
-    if (!window.confirm(`Move shipped/cancelled orders before ${archiveBefore} into the archive sheet? Open orders are never touched.`)) return;
+    if (!healthCustomer) { notify('Pick a customer first.', 'error'); return; }
+    if (!(await confirm({ title: 'Archive old orders', message: `Move shipped/cancelled orders before ${archiveBefore} into the archive sheet? Open orders are never touched.`, confirmLabel: 'Archive' }))) return;
     setBusy(true);
     try {
-      const beforeISO = new Date(archiveBefore + 'T00:00:00Z').toISOString();
+      const beforeISO = new Date(archiveBefore + 'T00:00:00+05:30').toISOString();
       const { moved } = await api.archiveOrders(healthCustomer, beforeISO);
-      alert(`Archived ${moved} order(s).`);
+      notify(`Archived ${moved} order(s).`, 'success');
       loadHealth(healthCustomer);
-    } catch (e: any) { alert('Archive failed: ' + e.message); } finally { setBusy(false); }
+    } catch (e: any) { notify('Archive failed: ' + e.message, 'error'); } finally { setBusy(false); }
   };
 
   const load = async () => {
+    setLoading(true);
     try {
       const [{ customers }, { users }, { hubCodes }] = await Promise.all([api.listCustomers(), api.listUsers(), api.listHubCodes()]);
       setCustomers(customers); setUsers(users); setHubCodes(hubCodes);
-    } catch (e: any) { alert('Load failed: ' + e.message); }
+    } catch (e: any) { notify('Load failed: ' + e.message, 'error'); }
+    finally { setLoading(false); }
   };
 
   const createCustomer = async () => {
-    if (!cust.customerId || !cust.name) { alert('Customer code and name are required.'); return; }
+    if (!cust.customerId || !cust.name) { notify('Customer code and name are required.', 'error'); return; }
     setBusy(true);
     try {
       const res = await api.createCustomer(cust as any);
-      alert(`Created ${cust.customerId}. Spreadsheet: ${res.spreadsheetUrl}`);
+      notify(`Created ${cust.customerId}. Spreadsheet: ${res.spreadsheetUrl}`, 'success');
       setCust({ customerId: '', name: '', senderName: '', senderPhone: '', senderAddr1: '', senderAddr2: '', senderCity: '', senderState: '', senderPincode: '', senderEmail: '', hubCustomerCode: '' });
       load();
-    } catch (e: any) { alert('Create failed: ' + e.message); } finally { setBusy(false); }
+    } catch (e: any) { notify('Create failed: ' + e.message, 'error'); } finally { setBusy(false); }
   };
 
   const addUser = async () => {
-    if (!user.email) { alert('Email required.'); return; }
-    if (user.role !== 'superadmin' && !user.customerId) { alert('Pick a customer for non-superadmins.'); return; }
+    if (!user.email) { notify('Email required.', 'error'); return; }
+    if (user.role !== 'superadmin' && !user.customerId) { notify('Pick a customer for non-superadmins.', 'error'); return; }
     setBusy(true);
-    try { await api.addUser(user); setUser({ email: '', customerId: '', role: 'member' }); load(); }
-    catch (e: any) { alert('Add user failed: ' + e.message); } finally { setBusy(false); }
+    try { await api.addUser(user); setUser({ email: '', customerId: '', role: 'member' }); load(); notify('User added.', 'success'); }
+    catch (e: any) { notify('Add user failed: ' + e.message, 'error'); } finally { setBusy(false); }
   };
 
   const addHubCode = async () => {
-    if (!newHub.code.trim()) { alert('Hub customer code is required.'); return; }
+    if (!newHub.code.trim()) { notify('Hub customer code is required.', 'error'); return; }
     setBusy(true);
     try { await api.addHubCode(newHub.code.trim(), newHub.label.trim()); setNewHub({ code: '', label: '' }); load(); }
-    catch (e: any) { alert('Add hub code failed: ' + e.message); } finally { setBusy(false); }
+    catch (e: any) { notify('Add hub code failed: ' + e.message, 'error'); } finally { setBusy(false); }
   };
 
   const loadRanges = async (customerId: string) => {
     setRangeCustomer(customerId);
     if (!customerId) { setRanges([]); return; }
+    setLoadingRanges(true);
     try { setRanges((await api.listTrackingRanges(customerId)).ranges); } catch { setRanges([]); }
+    finally { setLoadingRanges(false); }
   };
 
   const addRange = async () => {
-    if (!rangeCustomer || !rangeForm.start || !rangeForm.end) { alert('Customer, start and end are required.'); return; }
+    if (!rangeCustomer || !rangeForm.start || !rangeForm.end) { notify('Customer, start and end are required.', 'error'); return; }
     setBusy(true);
     try {
       await api.addTrackingRange(rangeCustomer, { prefix: rangeForm.prefix, start: Number(rangeForm.start), end: Number(rangeForm.end), pad: rangeForm.pad ? Number(rangeForm.pad) : undefined });
       setRangeForm({ prefix: rangeForm.prefix, start: '', end: '', pad: '' });
       loadRanges(rangeCustomer);
-    } catch (e: any) { alert(rangeErr(e)); } finally { setBusy(false); }
+    } catch (e: any) { notify(rangeErr(e), 'error'); } finally { setBusy(false); }
   };
 
   const toggleStatus = async (r: TrackingRange) => {
     const next = r.status === 'paused' ? 'active' : 'paused';
     try { await api.updateTrackingRange(rangeCustomer, r.seq, { status: next }); loadRanges(rangeCustomer); }
-    catch (e: any) { alert(rangeErr(e)); }
+    catch (e: any) { notify(rangeErr(e), 'error'); }
   };
 
   const openEdit = (r: TrackingRange) => {
@@ -145,13 +158,13 @@ export const SuperAdmin = () => {
       await api.updateTrackingRange(rangeCustomer, editRange.seq, payload);
       setEditRange(null);
       loadRanges(rangeCustomer);
-    } catch (e: any) { alert(rangeErr(e)); } finally { setBusy(false); }
+    } catch (e: any) { notify(rangeErr(e), 'error'); } finally { setBusy(false); }
   };
 
   const doDelete = async (r: TrackingRange) => {
-    if (!window.confirm(`Delete range ${r.prefix}${r.start}–${r.prefix}${r.end}?`)) return;
+    if (!(await confirm({ title: 'Delete tracking range', message: <>Delete range <strong>{r.prefix}{r.start}–{r.prefix}{r.end}</strong>? This cannot be undone.</>, requireCode: true }))) return;
     try { await api.deleteTrackingRange(rangeCustomer, r.seq); loadRanges(rangeCustomer); }
-    catch (e: any) { alert(rangeErr(e)); }
+    catch (e: any) { notify(rangeErr(e), 'error'); }
   };
 
   const doReassign = async () => {
@@ -161,7 +174,7 @@ export const SuperAdmin = () => {
       await api.reassignTrackingRange(rangeCustomer, reassignTo, reassign.seq);
       setReassign(null); setReassignTo('');
       loadRanges(rangeCustomer);
-    } catch (e: any) { alert(rangeErr(e)); } finally { setBusy(false); }
+    } catch (e: any) { notify(rangeErr(e), 'error'); } finally { setBusy(false); }
   };
 
   if (profile?.role !== 'superadmin') return <div className="page-title">Superadmins only.</div>;
@@ -205,6 +218,8 @@ export const SuperAdmin = () => {
 
           <div className="glass-card">
             <h3 style={{ marginTop: 0 }}>Customers ({customers.length})</h3>
+            {loading && <p style={{ color: 'var(--text-secondary)' }}>Loading…</p>}
+            {!loading && customers.length === 0 && <p style={{ color: 'var(--text-secondary)' }}>No customers yet.</p>}
             {customers.map((c) => (
               <div key={c.customerId} style={{ padding: '0.5rem 0', borderBottom: '1px solid var(--border-color)' }}>
                 <strong>{c.name}</strong> <span className="badge badge-gray">{c.customerId}</span>
@@ -225,7 +240,7 @@ export const SuperAdmin = () => {
             <label className="input-label">Role</label>
             <select className="input-field" value={user.role}
               onChange={(e) => setUser({ ...user, role: e.target.value, customerId: e.target.value === 'superadmin' ? '' : user.customerId })}>
-              <option value="member">member</option><option value="admin">admin</option><option value="superadmin">superadmin</option>
+              <option value="member">member</option><option value="admin">admin</option><option value="operator">operator</option><option value="superadmin">superadmin</option>
             </select>
           </div>
           <div className="input-group">
@@ -245,6 +260,8 @@ export const SuperAdmin = () => {
           <button className="btn btn-primary" onClick={addUser} disabled={busy || (user.role !== 'superadmin' && !user.customerId) || !user.email}><Save size={16} /> Add User</button>
           <h4 style={{ marginBottom: '0.5rem' }}>Users ({users.length})</h4>
           <div style={{ fontSize: '0.85rem' }}>
+            {loading && <div style={{ color: 'var(--text-secondary)' }}>Loading…</div>}
+            {!loading && users.length === 0 && <div style={{ color: 'var(--text-secondary)' }}>No users yet.</div>}
             {users.map((u) => <div key={u.email} style={{ padding: '0.2rem 0' }}>{u.email} — <strong>{u.role}</strong>{u.customerId ? ` · ${u.customerId}` : ''}</div>)}
           </div>
         </div>
@@ -261,8 +278,9 @@ export const SuperAdmin = () => {
           </div>
           <button className="btn btn-primary" onClick={addHubCode} disabled={busy} style={{ marginTop: '0.5rem' }}><Save size={16} /> Add Hub Code</button>
           <div style={{ marginTop: '1rem', fontSize: '0.85rem' }}>
+            {loading && <div style={{ color: 'var(--text-secondary)' }}>Loading…</div>}
             {hubCodes.map((h) => <div key={h.code} style={{ padding: '0.25rem 0', borderBottom: '1px solid var(--border-color)' }}><strong>{h.code}</strong>{h.label ? ` — ${h.label}` : ''}</div>)}
-            {hubCodes.length === 0 && <div style={{ color: 'var(--text-secondary)' }}>No hub codes yet.</div>}
+            {!loading && hubCodes.length === 0 && <div style={{ color: 'var(--text-secondary)' }}>No hub codes yet.</div>}
           </div>
         </div>
       )}
@@ -290,6 +308,7 @@ export const SuperAdmin = () => {
               <button className="btn btn-primary" onClick={addRange} disabled={busy} style={{ marginTop: '0.5rem' }}><Save size={16} /> Add Range</button>
 
               <div style={{ marginTop: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                {loadingRanges && <div style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>Loading…</div>}
                 {ranges.map((r) => (
                   <div key={r.seq} style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '0.75rem' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
@@ -312,7 +331,7 @@ export const SuperAdmin = () => {
                     </div>
                   </div>
                 ))}
-                {ranges.length === 0 && <div style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>No ranges for this customer yet.</div>}
+                {!loadingRanges && ranges.length === 0 && <div style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>No ranges for this customer yet.</div>}
               </div>
             </>
           )}
@@ -351,6 +370,7 @@ export const SuperAdmin = () => {
                 {customers.map((c) => <option key={c.customerId} value={c.customerId}>{c.name} ({c.customerId})</option>)}
               </select>
             </div>
+            {loadingHealth && <p style={{ color: 'var(--text-secondary)' }}>Loading…</p>}
             {health && (
               <>
                 <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', margin: '0.5rem 0 1rem' }}>

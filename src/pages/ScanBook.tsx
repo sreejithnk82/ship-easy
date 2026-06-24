@@ -1,7 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { ScanLine, FileSpreadsheet, Truck, Check, AlertTriangle, X, Pencil, Ban } from 'lucide-react';
 import { api, Product, OpenOrder } from '../lib/api';
-import { useProfile, isAdmin } from '../lib/profile';
+import { useProfile, isAdmin, canScan } from '../lib/profile';
+import { useToast, useConfirm } from '../components/feedback';
+import { istDateLabel, istDateTimeLabel } from '../lib/datetime';
 import { useActiveCustomer } from '../lib/activeCustomer';
 import { downloadDtdc, DtdcOrder } from '../lib/dtdc';
 import { stateFromPincode } from '../lib/pincode';
@@ -12,6 +14,8 @@ export const ScanBook = () => {
   const profile = useProfile();
   const { activeId } = useActiveCustomer();
   const customerId = profile?.customerId || activeId;
+  const notify = useToast();
+  const confirm = useConfirm();
 
   const [openMap, setOpenMap] = useState<Map<string, OpenOrder>>(new Map());
   const [products, setProducts] = useState<Product[]>([]);
@@ -54,7 +58,7 @@ export const ScanBook = () => {
     if (scanned.some((s) => s.trackingId === id)) { setFlash({ kind: 'warn', text: `Already scanned: ${id}` }); return; }
     setScanned((prev) => [order, ...prev]);
     if (order.exportedAt) {
-      setFlash({ kind: 'warn', text: `Added — ALREADY EXPORTED ${new Date(order.exportedAt).toLocaleDateString()}: ${order.receiverName}` });
+      setFlash({ kind: 'warn', text: `Added — ALREADY EXPORTED ${istDateLabel(order.exportedAt)}: ${order.receiverName}` });
     } else {
       setFlash({ kind: 'ok', text: `Added: ${order.receiverName} (${order.receiverState})` });
     }
@@ -66,7 +70,11 @@ export const ScanBook = () => {
     const warn = o.exportedAt
       ? '\n\nNOTE: this was already exported to DTDC — make sure you did NOT already book it with the courier.'
       : '';
-    if (!window.confirm(`Void / cancel ${o.receiverName} (${o.trackingId})?\nThe tracking ID is cancelled and never reused.${warn}`)) return;
+    if (!(await confirm({
+      title: 'Void / cancel order',
+      message: `Void / cancel ${o.receiverName} (${o.trackingId})?\nThe tracking ID is cancelled and never reused.${warn}`,
+      confirmLabel: 'Void', danger: true,
+    }))) return;
     setBusy(true);
     try {
       await api.voidOrder(customerId, o.trackingId);
@@ -75,7 +83,7 @@ export const ScanBook = () => {
       setFlash({ kind: 'ok', text: `Voided ${o.receiverName}` });
     } catch (err: any) {
       const msg = err.code === 'ALREADY_SHIPPED' ? 'Already shipped — cannot void.' : err.message;
-      alert('Void failed: ' + msg);
+      notify('Void failed: ' + msg, 'error');
     } finally {
       setBusy(false);
     }
@@ -93,7 +101,7 @@ export const ScanBook = () => {
     if (!editing) return;
     const e = editForm;
     if (!e.name || !e.phone || !e.line1 || !e.line2 || e.pincode.replace(/\D/g, '').length !== 6) {
-      alert('Name, phone, both address lines and a valid pincode are required.'); return;
+      notify('Name, phone, both address lines and a valid pincode are required.', 'error'); return;
     }
     setBusy(true);
     const fields = {
@@ -111,14 +119,14 @@ export const ScanBook = () => {
       setFlash({ kind: 'ok', text: `Updated ${updated.receiverName}` });
     } catch (err: any) {
       const msg = err.code === 'ALREADY_SHIPPED' ? 'Already shipped — cannot edit.' : err.message;
-      alert('Update failed: ' + msg);
+      notify('Update failed: ' + msg, 'error');
     } finally {
       setBusy(false);
     }
   };
 
   const exportCsv = async () => {
-    if (scanned.length === 0) { alert('Scan some packets first.'); return; }
+    if (scanned.length === 0) { notify('Scan some packets first.', 'error'); return; }
     const ids = scanned.map((s) => s.trackingId);
 
     // Stamp the orders as exported so the same parcels can't be silently
@@ -128,18 +136,27 @@ export const ScanBook = () => {
     try {
       stamp = await api.recordExport(customerId, ids);
     } catch (e: any) {
-      if (!window.confirm('Could not record the export on the server (offline?).\nDownload the file anyway? (re-export protection will not apply)')) { setBusy(false); return; }
+      const ok = await confirm({
+        title: 'Export anyway?',
+        message: 'Could not record the export on the server (offline?).\nDownload the file anyway? (re-export protection will not apply)',
+        confirmLabel: 'Download anyway', danger: true,
+      });
+      if (!ok) { setBusy(false); return; }
     } finally {
       setBusy(false);
     }
 
     if (stamp && stamp.alreadyExported.length) {
       const first = stamp.alreadyExported[0];
-      if (!window.confirm(
-        `${stamp.alreadyExported.length} of these parcels were ALREADY exported earlier ` +
-        `(e.g. ${first.trackingId} on ${new Date(first.exportedAt).toLocaleString()}).\n\n` +
-        `Re-exporting risks DOUBLE-BOOKING them with the courier. Download anyway?`
-      )) return;
+      const ok = await confirm({
+        title: 'Already exported',
+        message:
+          `${stamp.alreadyExported.length} of these parcels were ALREADY exported earlier ` +
+          `(e.g. ${first.trackingId} on ${istDateTimeLabel(first.exportedAt)}).\n\n` +
+          `Re-exporting risks DOUBLE-BOOKING them with the courier. Download anyway?`,
+        confirmLabel: 'Download anyway', danger: true,
+      });
+      if (!ok) return;
     }
 
     if (stamp) {
@@ -159,8 +176,8 @@ export const ScanBook = () => {
   };
 
   const markShipped = async () => {
-    if (scanned.length === 0) { alert('Nothing scanned.'); return; }
-    if (!window.confirm(`Mark ${scanned.length} packets shipped and record a manifest?`)) return;
+    if (scanned.length === 0) { notify('Nothing scanned.', 'error'); return; }
+    if (!(await confirm({ title: 'Mark shipped', message: `Mark ${scanned.length} packets shipped and record a manifest?`, confirmLabel: 'Mark shipped' }))) return;
     setBusy(true);
     try {
       const ids = scanned.map((s) => s.trackingId);
@@ -175,7 +192,7 @@ export const ScanBook = () => {
     }
   };
 
-  if (!isAdmin(profile)) return <div className="page-title">Admins only.</div>;
+  if (!canScan(profile)) return <div className="page-title">Admins only.</div>;
   if (!customerId) {
     return <div><h1 className="page-title">Scan &amp; Book</h1>
       <p style={{ color: 'var(--text-secondary)' }}>Select a customer in the "Acting as" bar above to scan their parcels.</p></div>;
@@ -235,8 +252,12 @@ export const ScanBook = () => {
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <strong>{s.receiverName}</strong>
                   <div style={{ display: 'flex', gap: '0.5rem' }}>
-                    <button title="Edit" onClick={() => startEdit(s)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--primary-color)' }}><Pencil size={16} /></button>
-                    <button title="Void / cancel" onClick={() => voidOrder(s)} disabled={busy} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger-color)' }}><Ban size={16} /></button>
+                    {isAdmin(profile) && (
+                      <button title="Edit" onClick={() => startEdit(s)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--primary-color)' }}><Pencil size={16} /></button>
+                    )}
+                    {isAdmin(profile) && (
+                      <button title="Void / cancel" onClick={() => voidOrder(s)} disabled={busy} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger-color)' }}><Ban size={16} /></button>
+                    )}
                     <button title="Remove from this scan" onClick={() => removeScan(s.trackingId)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)' }}><X size={18} /></button>
                   </div>
                 </div>

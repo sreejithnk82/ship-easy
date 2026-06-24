@@ -1,26 +1,37 @@
 import { useState, useEffect } from 'react';
-import { Package, Save, Plus, X, Pencil, Trash2 } from 'lucide-react';
-import { api, Product, HubCode } from '../lib/api';
+import { useNavigate } from 'react-router-dom';
+import { Package, Save, Plus, X, Pencil, Trash2, MapPin } from 'lucide-react';
+import { api, Product, HubCode, SenderAddress } from '../lib/api';
 import { ApiError } from '../lib/api';
 import { useProfile } from '../lib/profile';
 import { useActiveCustomer } from '../lib/activeCustomer';
+import { NEW_ADDRESS_KEY } from './Addresses';
+import { useToast, useConfirm } from '../components/feedback';
 
 const EMPTY = {
-  productCode: '', name: '', hubCustomerCode: '',
-  senderName: '', senderPhone: '', senderAddr1: '', senderAddr2: '',
-  senderCity: '', senderState: '', senderPincode: '', senderEmail: '',
+  name: '', hubCustomerCode: '', senderAddressId: '',
   content: 'OTHERS', description: '', declaredValue: '',
   weightG: '', lengthCm: '', widthCm: '', heightCm: '',
 };
 type FormState = typeof EMPTY;
 
+// Sentinel value for the "+ Add new address…" option in the sender dropdown.
+const ADD_NEW = '__add_new__';
+// Where we park the in-progress product form while the user nips off to add an
+// address, so they come back to exactly what they were typing.
+const DRAFT_KEY = 'shipeasy.draftProduct';
+
 export const Products = () => {
   const profile = useProfile();
+  const navigate = useNavigate();
   const { activeId } = useActiveCustomer();
   const customerId = profile?.customerId || activeId;
   const admin = profile?.role === 'superadmin'; // only superadmins manage products
+  const notify = useToast();
+  const confirm = useConfirm();
   const [products, setProducts] = useState<Product[]>([]);
   const [hubCodes, setHubCodes] = useState<HubCode[]>([]);
+  const [addresses, setAddresses] = useState<SenderAddress[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<FormState>({ ...EMPTY });
@@ -29,27 +40,42 @@ export const Products = () => {
 
   useEffect(() => { if (customerId) load(); else { setProducts([]); setLoading(false); } }, [customerId]);
 
+  // Coming back from the Addresses page: restore the parked draft and select the
+  // address that was just created.
+  useEffect(() => {
+    let draft: { form: FormState; editingId: string | null } | null = null;
+    try { const raw = sessionStorage.getItem(DRAFT_KEY); if (raw) draft = JSON.parse(raw); } catch { /* ignore */ }
+    let newAddrId = '';
+    try { newAddrId = sessionStorage.getItem(NEW_ADDRESS_KEY) || ''; } catch { /* ignore */ }
+    if (draft) {
+      setForm({ ...draft.form, senderAddressId: newAddrId || draft.form.senderAddressId });
+      setEditingId(draft.editingId);
+      setShowForm(true);
+    }
+    try { sessionStorage.removeItem(DRAFT_KEY); sessionStorage.removeItem(NEW_ADDRESS_KEY); } catch { /* ignore */ }
+  }, []);
+
   const load = async () => {
     setLoading(true);
     try {
-      const [{ products }, { hubCodes }] = await Promise.all([api.listProducts(customerId), api.listHubCodes()]);
-      setProducts(products); setHubCodes(hubCodes);
+      const [{ products }, { hubCodes }, { addresses }] = await Promise.all([
+        api.listProducts(customerId), api.listHubCodes(), api.listSenderAddresses(customerId),
+      ]);
+      setProducts(products); setHubCodes(hubCodes); setAddresses(addresses);
     } catch (e: any) {
-      alert('Failed to load: ' + e.message);
+      notify('Failed to load: ' + e.message, 'error');
     } finally {
       setLoading(false);
     }
   };
 
-  // New product: pre-fill the sender block from the customer's defaults.
   const openNew = () => {
     const c = profile?.customer;
     setEditingId(null);
     setForm({
       ...EMPTY,
-      senderName: c?.senderName || '', senderPhone: '', senderCity: c?.senderCity || '',
-      senderState: c?.senderState || '', senderPincode: c?.senderPincode || '',
       hubCustomerCode: c?.hubCustomerCode || '',
+      senderAddressId: addresses.length === 1 ? addresses[0].addressId : '',
     });
     setShowForm(true);
   };
@@ -57,9 +83,7 @@ export const Products = () => {
   const startEdit = (p: Product) => {
     setEditingId(p.productId);
     setForm({
-      productCode: p.productCode, name: p.name, hubCustomerCode: p.hubCustomerCode,
-      senderName: p.senderName, senderPhone: p.senderPhone, senderAddr1: p.senderAddr1, senderAddr2: p.senderAddr2,
-      senderCity: p.senderCity, senderState: p.senderState, senderPincode: p.senderPincode, senderEmail: p.senderEmail,
+      name: p.name, hubCustomerCode: p.hubCustomerCode, senderAddressId: p.senderAddressId || '',
       content: p.content || 'OTHERS', description: p.description, declaredValue: String(p.declaredValue),
       weightG: String(p.weightG), lengthCm: String(p.lengthCm), widthCm: String(p.widthCm), heightCm: String(p.heightCm),
     });
@@ -69,14 +93,23 @@ export const Products = () => {
 
   const closeForm = () => { setShowForm(false); setEditingId(null); setForm({ ...EMPTY }); };
 
+  // Park the draft and hop to the Addresses page to create a new "From" address.
+  const goAddAddress = () => {
+    try { sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ form, editingId })); } catch { /* ignore */ }
+    navigate('/addresses?return=1');
+  };
+
+  const onSenderChange = (v: string) => {
+    if (v === ADD_NEW) { goAddAddress(); return; }
+    setForm((f) => ({ ...f, senderAddressId: v }));
+  };
+
   const save = async () => {
-    if (!form.name || !form.weightG) { alert('Product name and weight are required.'); return; }
-    if (!form.senderName) { alert('Sender name is required.'); return; }
+    if (!form.name || !form.weightG) { notify('Product name and weight are required.', 'error'); return; }
+    if (!form.senderAddressId) { notify('Choose a sender address.', 'error'); return; }
     setSaving(true);
     const payload = {
-      productCode: form.productCode, name: form.name, hubCustomerCode: form.hubCustomerCode,
-      senderName: form.senderName, senderPhone: form.senderPhone, senderAddr1: form.senderAddr1, senderAddr2: form.senderAddr2,
-      senderCity: form.senderCity, senderState: form.senderState, senderPincode: form.senderPincode, senderEmail: form.senderEmail,
+      name: form.name, hubCustomerCode: form.hubCustomerCode, senderAddressId: form.senderAddressId,
       content: form.content || 'OTHERS', description: form.description || form.name,
       declaredValue: Number(form.declaredValue) || 0,
       weightG: Number(form.weightG), lengthCm: Number(form.lengthCm) || 0,
@@ -88,20 +121,20 @@ export const Products = () => {
       closeForm();
       load();
     } catch (e: any) {
-      alert('Failed to save: ' + e.message);
+      notify('Failed to save: ' + e.message, 'error');
     } finally {
       setSaving(false);
     }
   };
 
   const remove = async (p: Product) => {
-    if (!window.confirm(`Delete "${p.name}"?`)) return;
+    if (!(await confirm({ title: 'Delete product', message: <>Delete <strong>{p.name}</strong>? This cannot be undone.</>, requireCode: true }))) return;
     try {
       await api.deleteProduct(p.productId, customerId);
       load();
     } catch (e) {
-      if (e instanceof ApiError && e.code === 'IN_USE') alert('Cannot delete: this product is used by existing orders.');
-      else alert('Delete failed: ' + (e as Error).message);
+      if (e instanceof ApiError && e.code === 'IN_USE') notify('Cannot delete: this product is used by existing orders.', 'error');
+      else notify('Delete failed: ' + (e as Error).message, 'error');
     }
   };
 
@@ -129,10 +162,16 @@ export const Products = () => {
         <div className="glass-card" style={{ marginBottom: '2rem' }}>
           <h3 style={{ marginBottom: '1rem' }}>{editingId ? 'Edit Product' : 'Add Product'}</h3>
 
-          <h4 style={{ margin: '0 0 0.5rem', color: 'var(--text-secondary)' }}>Product</h4>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '0.75rem' }}>
             <F label="Name *" v={form.name} on={set('name')} ph="e.g. FY CART" />
-            <F label="Product Code" v={form.productCode} on={set('productCode')} ph="OF2357C004P002" />
+            <div className="input-group" style={{ margin: 0 }}>
+              <label className="input-label">Sender Address *</label>
+              <select className="input-field" value={form.senderAddressId} onChange={(e) => onSenderChange(e.target.value)}>
+                <option value="">— choose —</option>
+                {addresses.map((a) => <option key={a.addressId} value={a.addressId}>{a.label || a.senderName}</option>)}
+                <option value={ADD_NEW}>+ Add new address…</option>
+              </select>
+            </div>
             <div className="input-group" style={{ margin: 0 }}>
               <label className="input-label">Hub Customer Code</label>
               <select className="input-field" value={form.hubCustomerCode} onChange={(e) => set('hubCustomerCode')(e.target.value)}>
@@ -141,7 +180,7 @@ export const Products = () => {
               </select>
             </div>
             <F label="Content" v={form.content} on={set('content')} ph="OTHERS / PERFUMES / CLOTHING" />
-            <F label="Description *" v={form.description} on={set('description')} ph="DTDC item text e.g. MOBILE CASE" />
+            <F label="Description" v={form.description} on={set('description')} ph="DTDC item text e.g. MOBILE CASE" />
             <F label="Declared Value (₹)" type="number" v={form.declaredValue} on={set('declaredValue')} />
             <F label="Weight (g) *" type="number" v={form.weightG} on={set('weightG')} />
             <F label="Length (cm)" type="number" v={form.lengthCm} on={set('lengthCm')} />
@@ -149,17 +188,11 @@ export const Products = () => {
             <F label="Height (cm)" type="number" v={form.heightCm} on={set('heightCm')} />
           </div>
 
-          <h4 style={{ margin: '1.25rem 0 0.5rem', color: 'var(--text-secondary)' }}>Sender (appears as the "From" on this product's shipments)</h4>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '0.75rem' }}>
-            <F label="Sender Name *" v={form.senderName} on={set('senderName')} />
-            <F label="Sender Phone" v={form.senderPhone} on={set('senderPhone')} />
-            <F label="Pincode" v={form.senderPincode} on={set('senderPincode')} />
-            <F label="City" v={form.senderCity} on={set('senderCity')} />
-            <F label="State" v={form.senderState} on={set('senderState')} />
-            <F label="Address 1" v={form.senderAddr1} on={set('senderAddr1')} />
-            <F label="Address 2" v={form.senderAddr2} on={set('senderAddr2')} />
-            <F label="Email" v={form.senderEmail} on={set('senderEmail')} />
-          </div>
+          {addresses.length === 0 && (
+            <p style={{ marginTop: '0.75rem', fontSize: '0.85rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+              <MapPin size={15} /> No sender addresses yet — pick "+ Add new address…" above to create one.
+            </p>
+          )}
 
           <button className="btn btn-primary" onClick={save} disabled={saving} style={{ marginTop: '1.5rem' }}>
             <Save size={18} /> {saving ? 'Saving…' : editingId ? 'Update' : 'Save'}
