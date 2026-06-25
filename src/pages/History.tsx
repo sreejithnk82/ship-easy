@@ -87,7 +87,7 @@ export const History = () => {
     .sort((a, b) => b.createdAt - a.createdAt);
 
   const regenerate = (b: UiBatch) =>
-    downloadLabels(b.labels, b.products, fmt, `labels_${b.batchId.slice(0, 8)}.pdf`, { bookedAt: b.createdAt });
+    downloadLabels(b.labels, b.products, fmt, `labels_${b.batchId.slice(0, 8)}.pdf`);
 
   if (!customerId) {
     return <div className="fade-in"><h1 className="page-title">Label History</h1>
