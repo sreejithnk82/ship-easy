@@ -55,9 +55,10 @@ function action_createCustomer_(payload, ctx) {
 
 function seedCustomerSpreadsheet_(ss) {
   var specs = [
-    [SHEETS.PRODUCTS, ['product_id', 'product_code', 'name', 'hub_customer_code', 'sender_name', 'sender_phone', 'sender_addr1', 'sender_addr2', 'sender_city', 'sender_state', 'sender_pincode', 'sender_email', 'content', 'description', 'declared_value', 'weight_g', 'length_cm', 'width_cm', 'height_cm', 'created_at']],
+    [SHEETS.PRODUCTS, ['product_id', 'product_code', 'name', 'hub_customer_code', 'sender_address_id', 'sender_name', 'sender_phone', 'sender_addr1', 'sender_addr2', 'sender_city', 'sender_state', 'sender_pincode', 'sender_email', 'content', 'description', 'declared_value', 'weight_g', 'length_cm', 'width_cm', 'height_cm', 'created_at']],
+    [SHEETS.ADDRESSES, ['address_id', 'label', 'sender_name', 'sender_phone', 'sender_addr1', 'sender_addr2', 'sender_city', 'sender_state', 'sender_pincode', 'sender_email', 'created_at']],
     [SHEETS.RANGES, ['seq', 'prefix', 'start', 'end', 'pad', 'cursor', 'status']],
-    [SHEETS.ORDERS, ['order_id', 'batch_id', 'client_order_id', 'tracking_id', 'product_id', 'receiver_name', 'receiver_phone', 'receiver_pincode', 'receiver_line1', 'receiver_line2', 'receiver_state', 'status', 'operator_email', 'created_at', 'manifest_id', 'shipped_at']],
+    [SHEETS.ORDERS, ['order_id', 'batch_id', 'client_order_id', 'tracking_id', 'product_id', 'receiver_name', 'receiver_phone', 'receiver_pincode', 'receiver_line1', 'receiver_line2', 'receiver_state', 'status', 'operator_email', 'created_at', 'manifest_id', 'shipped_at', 'exported_at', 'export_id', 'voided_at', 'voided_by']],
     [SHEETS.BATCHES, ['batch_id', 'idempotency_key', 'operator_email', 'count', 'orders_json', 'result_json', 'status', 'created_at']],
     [SHEETS.MANIFESTS, ['manifest_id', 'customer_id', 'admin_email', 'tracking_ids_json', 'count', 'status', 'created_at']],
   ];
@@ -91,7 +92,7 @@ function action_addHubCode_(payload, ctx) {
   var sh = ensureSheet_(getDirectorySpreadsheet_(), SHEETS.HUBCODES, HUBCODE_HEADERS);
   var dup = readObjects_(sh).rows.find(function (r) { return String(r.hub_customer_code) === code; });
   if (dup) return { ok: false, error: 'DUPLICATE', detail: 'hub code already exists' };
-  appendRowObjects_(sh, [{ hub_customer_code: code, label: payload.label || '', created_at: new Date().toISOString() }]);
+  appendRowObjects_(sh, [{ hub_customer_code: code, label: payload.label || '', created_at: nowIso_() }]);
   return { ok: true };
 }
 
@@ -101,7 +102,7 @@ function action_addUser_(payload, ctx) {
   if (!requireSuperadmin_(ctx)) return forbidden_();
   var u = payload.user || {};
   if (!u.email) return badRequest_('user.email required');
-  if (['member', 'admin', 'superadmin'].indexOf(u.role) < 0) return badRequest_('invalid role');
+  if (['member', 'admin', 'operator', 'superadmin'].indexOf(u.role) < 0) return badRequest_('invalid role');
 
   var usersSheet = getSheetOrThrow_(getDirectorySpreadsheet_(), SHEETS.USERS);
   var email = String(u.email).toLowerCase();

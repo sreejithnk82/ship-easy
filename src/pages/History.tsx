@@ -5,6 +5,8 @@ import { useProfile } from '../lib/profile';
 import { useActiveCustomer } from '../lib/activeCustomer';
 import { listBatches, SavedBatch } from '../lib/outbox';
 import { downloadLabels } from '../lib/labels';
+import { getLabelFormat, setLabelFormat, LabelFormat } from '../lib/labelFormat';
+import { LabelFormatPicker } from '../components/LabelFormatPicker';
 import { istDayKey, istDateLabel, istTimeLabel, istDateTimeLabel, todayIstDayKey } from '../lib/datetime';
 import { whatsappShareLink, shipmentMessage } from '../lib/share';
 import { useToast } from '../components/feedback';
@@ -31,6 +33,9 @@ export const History = () => {
   const [loading, setLoading] = useState(true);
   const [day, setDay] = useState<string>(todayIstDayKey());
   const [openBatch, setOpenBatch] = useState<string | null>(null);
+  const [fmt, setFmt] = useState<LabelFormat>(getLabelFormat());
+
+  const changeFmt = (f: LabelFormat) => { setFmt(f); setLabelFormat(f); };
 
   useEffect(() => { if (customerId) load(); else setLoading(false); }, [customerId]);
 
@@ -81,7 +86,8 @@ export const History = () => {
     .filter((b) => istDayKey(b.createdAt) === day)
     .sort((a, b) => b.createdAt - a.createdAt);
 
-  const regenerate = (b: UiBatch) => downloadLabels(b.labels, b.products, `labels_${b.batchId.slice(0, 8)}.pdf`);
+  const regenerate = (b: UiBatch) =>
+    downloadLabels(b.labels, b.products, fmt, `labels_${b.batchId.slice(0, 8)}.pdf`, { bookedAt: b.createdAt });
 
   if (!customerId) {
     return <div className="fade-in"><h1 className="page-title">Label History</h1>
@@ -109,6 +115,11 @@ export const History = () => {
           {istDateLabel(dayAsIst(day))}
           {serverOrders === null && <span title="Offline — showing this device's cache" style={{ display: 'inline-flex', marginLeft: 6, verticalAlign: 'middle' }}><WifiOff size={14} /></span>}
         </span>
+      </div>
+
+      <div className="glass-card" style={{ marginBottom: '1.5rem' }}>
+        <p style={{ margin: '0 0 0.6rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Label size for downloads</p>
+        <LabelFormatPicker value={fmt} onChange={changeFmt} />
       </div>
 
       {loading ? (

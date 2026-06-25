@@ -71,7 +71,7 @@ function generateLabels(req) {
     }
 
     var batchId = Utilities.getUuid();
-    var createdAt = new Date().toISOString();
+    var createdAt = nowIso_();
 
     // Pair each order with its assigned tracking id.
     var enriched = orders.map(function (o, i) {
@@ -203,7 +203,7 @@ function ensureOrderRows_(ss, batchRecord) {
   if (has) return;
 
   var enriched = JSON.parse(batchRecord.orders_json || '[]');
-  var createdAt = batchRecord.created_at || new Date().toISOString();
+  var createdAt = batchRecord.created_at || nowIso_();
   writeOrderRows_(ss, batchRecord.batch_id, batchRecord.operator_email || '', createdAt, enriched);
 }
 

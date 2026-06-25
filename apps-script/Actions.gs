@@ -35,24 +35,31 @@ function action_listProducts_(payload, ctx) {
   if (c.error) return c.error;
   var ss = getCustomerSpreadsheet_(c.id);
   var rows = readObjects_(getSheetOrThrow_(ss, SHEETS.PRODUCTS)).rows;
-  var products = rows.map(productFromRow_);
+  var addrById = senderAddressMap_(ss);
+  var products = rows.map(function (r) { return productFromRow_(r, addrById); });
   return { ok: true, products: products };
 }
 
-function productFromRow_(r) {
+// The sender block lives on a referenced SenderAddress (resolved live here) so
+// editing an address flows through to every product using it. Older products
+// store the sender fields inline; we fall back to those when no address is set.
+function productFromRow_(r, addrById) {
+  var addrId = r.sender_address_id ? String(r.sender_address_id) : '';
+  var a = (addrId && addrById) ? addrById[addrId] : null;
   return {
     productId: r.product_id,
     productCode: r.product_code || '',
     name: r.name,
     hubCustomerCode: r.hub_customer_code || '',
-    senderName: r.sender_name || '',
-    senderPhone: String(r.sender_phone || ''),
-    senderAddr1: r.sender_addr1 || '',
-    senderAddr2: r.sender_addr2 || '',
-    senderCity: r.sender_city || '',
-    senderState: r.sender_state || '',
-    senderPincode: String(r.sender_pincode || ''),
-    senderEmail: r.sender_email || '',
+    senderAddressId: addrId,
+    senderName: a ? a.senderName : (r.sender_name || ''),
+    senderPhone: a ? a.senderPhone : String(r.sender_phone || ''),
+    senderAddr1: a ? a.senderAddr1 : (r.sender_addr1 || ''),
+    senderAddr2: a ? a.senderAddr2 : (r.sender_addr2 || ''),
+    senderCity: a ? a.senderCity : (r.sender_city || ''),
+    senderState: a ? a.senderState : (r.sender_state || ''),
+    senderPincode: a ? a.senderPincode : String(r.sender_pincode || ''),
+    senderEmail: a ? a.senderEmail : (r.sender_email || ''),
     content: r.content || 'OTHERS',
     description: r.description || r.name,
     declaredValue: Number(r.declared_value) || 0,
@@ -66,6 +73,7 @@ function productFromRow_(r) {
 /** camelCase product field -> sheet column. Shared by add/update. */
 var PRODUCT_COLMAP = {
   productCode: 'product_code', name: 'name', hubCustomerCode: 'hub_customer_code',
+  senderAddressId: 'sender_address_id',
   senderName: 'sender_name', senderPhone: 'sender_phone', senderAddr1: 'sender_addr1',
   senderAddr2: 'sender_addr2', senderCity: 'sender_city', senderState: 'sender_state',
   senderPincode: 'sender_pincode', senderEmail: 'sender_email', content: 'content',
@@ -73,34 +81,53 @@ var PRODUCT_COLMAP = {
   lengthCm: 'length_cm', widthCm: 'width_cm', heightCm: 'height_cm',
 };
 
+// All sheet columns a product may write, so we can migrate older Products sheets
+// that predate sender_address_id before any add/update.
+function productColumns_() {
+  var cols = ['product_id'];
+  Object.keys(PRODUCT_COLMAP).forEach(function (k) { cols.push(PRODUCT_COLMAP[k]); });
+  cols.push('created_at');
+  return cols;
+}
+
+/** Auto-generate a short, unique-ish internal product code from the name. */
+function generateProductCode_(sheet, name) {
+  var slug = String(name || 'PROD').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6) || 'PROD';
+  var n = readObjects_(sheet).rows.length + 1;
+  return slug + '-' + ('000' + n).slice(-3);
+}
+
 function action_addProduct_(payload, ctx) {
-  if (!isAdmin_(ctx)) return forbidden_();
+  if (!isSuperadmin_(ctx)) return forbidden_();
   var c = resolveCustomerId_(payload, ctx);
   if (c.error) return c.error;
   var p = payload.product || {};
   if (!p.name) return badRequest_('product.name is required');
+  if (!p.senderAddressId && !p.senderName) return badRequest_('a sender address is required');
 
   var ss = getCustomerSpreadsheet_(c.id);
+  var sheet = ensureColumns_(getSheetOrThrow_(ss, SHEETS.PRODUCTS), productColumns_());
   var productId = Utilities.getUuid();
-  var row = { product_id: productId, created_at: new Date().toISOString() };
+  var row = { product_id: productId, created_at: nowIso_() };
   Object.keys(PRODUCT_COLMAP).forEach(function (k) {
     if (p[k] !== undefined) row[PRODUCT_COLMAP[k]] = p[k];
   });
+  if (!row.product_code) row.product_code = generateProductCode_(sheet, p.name); // auto, hidden from UI
   if (!row.description) row.description = p.name;
   if (!row.content) row.content = 'OTHERS';
-  appendRowObjects_(getSheetOrThrow_(ss, SHEETS.PRODUCTS), [row]);
-  return { ok: true, productId: productId };
+  appendRowObjects_(sheet, [row]);
+  return { ok: true, productId: productId, productCode: row.product_code };
 }
 
 function action_updateProduct_(payload, ctx) {
-  if (!isAdmin_(ctx)) return forbidden_();
+  if (!isSuperadmin_(ctx)) return forbidden_();
   var c = resolveCustomerId_(payload, ctx);
   if (c.error) return c.error;
   var productId = payload.productId;
   if (!productId) return badRequest_('productId required');
   var p = payload.product || {};
 
-  var sheet = getSheetOrThrow_(getCustomerSpreadsheet_(c.id), SHEETS.PRODUCTS);
+  var sheet = ensureColumns_(getSheetOrThrow_(getCustomerSpreadsheet_(c.id), SHEETS.PRODUCTS), productColumns_());
   var data = readObjects_(sheet);
   var row = data.rows.find(function (r) { return String(r.product_id) === String(productId); });
   if (!row) return { ok: false, error: 'NOT_FOUND' };
@@ -119,7 +146,7 @@ function action_updateProduct_(payload, ctx) {
 
 /** Delete a product, but refuse if any order still references it. */
 function action_deleteProduct_(payload, ctx) {
-  if (!isAdmin_(ctx)) return forbidden_();
+  if (!isSuperadmin_(ctx)) return forbidden_();
   var c = resolveCustomerId_(payload, ctx);
   if (c.error) return c.error;
   var productId = payload.productId;
@@ -137,11 +164,124 @@ function action_deleteProduct_(payload, ctx) {
   return { ok: true };
 }
 
+/* --------------------------- sender addresses -------------------------- */
+// Reusable "From" addresses, one set per customer. Products reference one by id
+// (sender_address_id); the sender block is resolved live in productFromRow_.
+
+var SENDER_ADDRESS_HEADERS = ['address_id', 'label', 'sender_name', 'sender_phone',
+  'sender_addr1', 'sender_addr2', 'sender_city', 'sender_state', 'sender_pincode',
+  'sender_email', 'created_at'];
+
+/** camelCase address field -> sheet column. */
+var ADDRESS_COLMAP = {
+  label: 'label', senderName: 'sender_name', senderPhone: 'sender_phone',
+  senderAddr1: 'sender_addr1', senderAddr2: 'sender_addr2', senderCity: 'sender_city',
+  senderState: 'sender_state', senderPincode: 'sender_pincode', senderEmail: 'sender_email',
+};
+
+/** Get (auto-creating for older customers) the SenderAddresses sheet. */
+function getAddressSheet_(ss) {
+  return ensureSheet_(ss, SHEETS.ADDRESSES, SENDER_ADDRESS_HEADERS);
+}
+
+function addressFromRow_(r) {
+  return {
+    addressId: r.address_id,
+    label: r.label || '',
+    senderName: r.sender_name || '',
+    senderPhone: String(r.sender_phone || ''),
+    senderAddr1: r.sender_addr1 || '',
+    senderAddr2: r.sender_addr2 || '',
+    senderCity: r.sender_city || '',
+    senderState: r.sender_state || '',
+    senderPincode: String(r.sender_pincode || ''),
+    senderEmail: r.sender_email || '',
+  };
+}
+
+/** Map address_id -> resolved address object, for joining onto products. */
+function senderAddressMap_(ss) {
+  var rows = readObjects_(getAddressSheet_(ss)).rows;
+  var map = {};
+  rows.forEach(function (r) { map[String(r.address_id)] = addressFromRow_(r); });
+  return map;
+}
+
+function action_listSenderAddresses_(payload, ctx) {
+  var c = resolveCustomerId_(payload, ctx);
+  if (c.error) return c.error;
+  var rows = readObjects_(getAddressSheet_(getCustomerSpreadsheet_(c.id))).rows;
+  return { ok: true, addresses: rows.map(addressFromRow_) };
+}
+
+function action_addSenderAddress_(payload, ctx) {
+  if (!isSuperadmin_(ctx)) return forbidden_();
+  var c = resolveCustomerId_(payload, ctx);
+  if (c.error) return c.error;
+  var a = payload.address || {};
+  if (!a.senderName) return badRequest_('address.senderName is required');
+
+  var sheet = getAddressSheet_(getCustomerSpreadsheet_(c.id));
+  var addressId = Utilities.getUuid();
+  var row = { address_id: addressId, created_at: nowIso_() };
+  Object.keys(ADDRESS_COLMAP).forEach(function (k) {
+    if (a[k] !== undefined) row[ADDRESS_COLMAP[k]] = a[k];
+  });
+  if (!row.label) row.label = a.senderName + (a.senderCity ? ' — ' + a.senderCity : '');
+  appendRowObjects_(sheet, [row]);
+  return { ok: true, addressId: addressId };
+}
+
+function action_updateSenderAddress_(payload, ctx) {
+  if (!isSuperadmin_(ctx)) return forbidden_();
+  var c = resolveCustomerId_(payload, ctx);
+  if (c.error) return c.error;
+  var addressId = payload.addressId;
+  if (!addressId) return badRequest_('addressId required');
+  var a = payload.address || {};
+
+  var sheet = getAddressSheet_(getCustomerSpreadsheet_(c.id));
+  var data = readObjects_(sheet);
+  var row = data.rows.find(function (r) { return String(r.address_id) === String(addressId); });
+  if (!row) return { ok: false, error: 'NOT_FOUND' };
+
+  var changed = 0;
+  Object.keys(ADDRESS_COLMAP).forEach(function (k) {
+    if (a[k] === undefined) return;
+    var col = data.headers.indexOf(ADDRESS_COLMAP[k]) + 1;
+    if (col < 1) return;
+    sheet.getRange(row._row, col).setValue(a[k]);
+    changed++;
+  });
+  SpreadsheetApp.flush();
+  return { ok: true, changed: changed };
+}
+
+/** Delete an address, but refuse if any product still references it. */
+function action_deleteSenderAddress_(payload, ctx) {
+  if (!isSuperadmin_(ctx)) return forbidden_();
+  var c = resolveCustomerId_(payload, ctx);
+  if (c.error) return c.error;
+  var addressId = payload.addressId;
+  if (!addressId) return badRequest_('addressId required');
+
+  var ss = getCustomerSpreadsheet_(c.id);
+  var products = readObjects_(getSheetOrThrow_(ss, SHEETS.PRODUCTS)).rows;
+  var inUse = products.some(function (r) { return String(r.sender_address_id) === String(addressId); });
+  if (inUse) return { ok: false, error: 'IN_USE', detail: 'Address is used by existing products.' };
+
+  var sheet = getAddressSheet_(ss);
+  var row = readObjects_(sheet).rows.find(function (r) { return String(r.address_id) === String(addressId); });
+  if (!row) return { ok: false, error: 'NOT_FOUND' };
+  sheet.deleteRow(row._row);
+  return { ok: true };
+}
+
 /* ------------------------ hub: scan & ship ----------------------------- */
 
 /** Orders generated but not yet shipped (status 'labeled') — for the scan screen. */
 function action_listOpenOrders_(payload, ctx) {
-  if (!isAdmin_(ctx)) return forbidden_();
+  if (!canScan_(ctx)) return forbidden_();
   var c = resolveCustomerId_(payload, ctx);
   if (c.error) return c.error;
   var ss = getCustomerSpreadsheet_(c.id);
@@ -159,6 +299,7 @@ function action_listOpenOrders_(payload, ctx) {
         receiverLine1: r.receiver_line1,
         receiverLine2: r.receiver_line2,
         receiverState: r.receiver_state,
+        exportedAt: r.exported_at ? String(r.exported_at) : '',
       };
     });
   return { ok: true, orders: open };
@@ -166,7 +307,7 @@ function action_listOpenOrders_(payload, ctx) {
 
 /** Mark a set of scanned tracking IDs shipped + record a manifest. */
 function action_commitShipment_(payload, ctx) {
-  if (!isAdmin_(ctx)) return forbidden_();
+  if (!canScan_(ctx)) return forbidden_();
   var c = resolveCustomerId_(payload, ctx);
   if (c.error) return c.error;
   var trackingIds = payload.trackingIds;
@@ -187,7 +328,7 @@ function action_commitShipment_(payload, ctx) {
     data.rows.forEach(function (r) { byTracking[String(r.tracking_id)] = r; });
 
     var manifestId = payload.manifestId || Utilities.getUuid();
-    var now = new Date().toISOString();
+    var now = nowIso_();
     var marked = [], already = [], notFound = [];
 
     trackingIds.forEach(function (t) {
@@ -290,6 +431,16 @@ function resolveCustomerId_(payload, ctx) {
 
 function isAdmin_(ctx) {
   return ctx.role === 'admin' || ctx.role === 'superadmin';
+}
+
+function isSuperadmin_(ctx) {
+  return ctx.role === 'superadmin';
+}
+
+// The warehouse "operator" role may scan, export the DTDC xlsx, and mark
+// shipped — but not void/edit orders or anything else admins can do.
+function canScan_(ctx) {
+  return ctx.role === 'operator' || isAdmin_(ctx);
 }
 
 function forbidden_() { return { ok: false, error: 'FORBIDDEN' }; }

@@ -19,11 +19,20 @@
 
 var SCRIPT_PROP_DIRECTORY_SS = 'DIRECTORY_SS_ID';
 
+// All timestamps are written in India Standard Time (IST). IST has no DST and is
+// always UTC+05:30, so we format the local-IST clock and append the fixed offset
+// — yielding an unambiguous, ISO-8601 string like "2026-06-24T16:05:00+05:30"
+// that both the sheet (human-readable IST) and the browser (Date.parse) agree on.
+function nowIso_() {
+  return Utilities.formatDate(new Date(), 'Asia/Kolkata', "yyyy-MM-dd'T'HH:mm:ss") + '+05:30';
+}
+
 var SHEETS = {
   CUSTOMERS: 'Customers',
   USERS: 'Users',
   HUBCODES: 'HubCodes',
   PRODUCTS: 'Products',
+  ADDRESSES: 'SenderAddresses',
   RANGES: 'TrackingRanges',
   ORDERS: 'Orders',
   BATCHES: 'Batches',
@@ -54,6 +63,23 @@ function ensureSheet_(ss, name, headers) {
     sh.setFrozenRows(1);
   }
   return sh;
+}
+
+/**
+ * Make sure `names` all exist as header columns; append any that are missing
+ * (to the right, preserving existing data). Used to migrate older per-customer
+ * sheets that predate a new column. Returns the sheet.
+ */
+function ensureColumns_(sheet, names) {
+  var lastCol = sheet.getLastColumn();
+  var headers = lastCol
+    ? sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(function (h) { return String(h).trim(); })
+    : [];
+  var missing = names.filter(function (n) { return headers.indexOf(n) === -1; });
+  if (missing.length) {
+    sheet.getRange(1, lastCol + 1, 1, missing.length).setValues([missing]);
+  }
+  return sheet;
 }
 
 /**

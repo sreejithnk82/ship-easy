@@ -11,6 +11,9 @@ import {
   newClientOrderId, PendingOrder, saveBatch,
 } from '../lib/outbox';
 import { downloadLabels } from '../lib/labels';
+import { getLabelFormat, setLabelFormat, LabelFormat } from '../lib/labelFormat';
+import { LabelFormatPicker } from '../components/LabelFormatPicker';
+import { LabelTile } from '../components/LabelTile';
 import { useToast, useConfirm } from '../components/feedback';
 
 const EMPTY = { name: '', phone: '', pincode: '', line1: '', line2: '', state: '', productId: '' };
@@ -32,6 +35,10 @@ export const AddOrder = () => {
   const [generating, setGenerating] = useState(false);
   const [loadingProducts, setLoadingProducts] = useState(true);
   const [loadingBalance, setLoadingBalance] = useState(true);
+  const [fmt, setFmt] = useState<LabelFormat>(getLabelFormat());
+  const [showPreview, setShowPreview] = useState(false);
+
+  const changeFmt = (f: LabelFormat) => { setFmt(f); setLabelFormat(f); };
 
   useEffect(() => { if (customerId) { loadProducts(); refresh(); refreshBalance(); } }, [customerId]);
 
@@ -137,10 +144,10 @@ export const AddOrder = () => {
           trackingId: a.trackingId, productId: p.productId,
           receiverName: p.receiverName, receiverPhone: p.receiverPhone,
           receiverPincode: p.receiverPincode, receiverLine1: p.receiverLine1,
-          receiverLine2: p.receiverLine2,
+          receiverLine2: p.receiverLine2, receiverState: p.receiverState,
         };
       });
-      downloadLabels(labelOrders, products);
+      downloadLabels(labelOrders, products, fmt);
       await saveBatch({
         batchId: res.batchId,
         customerId,
@@ -258,6 +265,35 @@ export const AddOrder = () => {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {pending.length > 0 && (
+        <div className="glass-card" style={{ marginTop: '1.5rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: '1rem', flexWrap: 'wrap' }}>
+            <LabelFormatPicker value={fmt} onChange={changeFmt} />
+            <button className="btn btn-outline" onClick={() => setShowPreview((s) => !s)} style={{ width: 'auto' }}>
+              {showPreview ? 'Hide preview' : 'Preview labels'}
+            </button>
+          </div>
+          {showPreview && (
+            <>
+              <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', margin: '0.75rem 0 0.5rem' }}>
+                Layout preview — tracking IDs are assigned when you generate.
+              </p>
+              <div style={{ display: 'flex', gap: '1rem', overflowX: 'auto', paddingBottom: '0.5rem' }}>
+                {pending.slice(0, 6).map((o) => (
+                  <LabelTile
+                    key={o.clientOrderId}
+                    scale={0.5}
+                    order={{ trackingId: 'SAMPLE0000', productId: o.productId, receiverName: o.receiverName, receiverPhone: o.receiverPhone, receiverPincode: o.receiverPincode, receiverLine1: o.receiverLine1, receiverLine2: o.receiverLine2, receiverState: o.receiverState }}
+                    product={productById.get(o.productId)}
+                  />
+                ))}
+              </div>
+              {pending.length > 6 && <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>+{pending.length - 6} more</p>}
+            </>
+          )}
         </div>
       )}
 

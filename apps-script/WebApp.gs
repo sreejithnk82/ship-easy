@@ -57,10 +57,18 @@ function dispatch_(action, payload, ctx) {
     case 'addProduct':     return action_addProduct_(payload, ctx);
     case 'updateProduct':  return action_updateProduct_(payload, ctx);
     case 'deleteProduct':  return action_deleteProduct_(payload, ctx);
+    case 'listSenderAddresses':  return action_listSenderAddresses_(payload, ctx);
+    case 'addSenderAddress':     return action_addSenderAddress_(payload, ctx);
+    case 'updateSenderAddress':  return action_updateSenderAddress_(payload, ctx);
+    case 'deleteSenderAddress':  return action_deleteSenderAddress_(payload, ctx);
     case 'generateLabels': return action_generateLabels_(payload, ctx);
     case 'listOpenOrders': return action_listOpenOrders_(payload, ctx);
     case 'updateOrder':    return action_updateOrder_(payload, ctx);
     case 'commitShipment': return action_commitShipment_(payload, ctx);
+    case 'voidOrder':      return action_voidOrder_(payload, ctx);
+    case 'recordExport':   return action_recordExport_(payload, ctx);
+    case 'listOrders':     return action_listOrders_(payload, ctx);
+    case 'customerBalance':return action_customerBalance_(payload, ctx);
     // superadmin onboarding
     case 'listCustomers':      return action_listCustomers_(payload, ctx);
     case 'createCustomer':     return action_createCustomer_(payload, ctx);
@@ -73,6 +81,9 @@ function dispatch_(action, payload, ctx) {
     case 'updateTrackingRange':   return action_updateTrackingRange_(payload, ctx);
     case 'deleteTrackingRange':   return action_deleteTrackingRange_(payload, ctx);
     case 'reassignTrackingRange': return action_reassignTrackingRange_(payload, ctx);
+    case 'listBalances':       return action_listBalances_(payload, ctx);
+    case 'customerHealth':     return action_customerHealth_(payload, ctx);
+    case 'archiveOrders':      return action_archiveOrders_(payload, ctx);
     default: return { ok: false, error: 'UNKNOWN_ACTION', detail: action };
   }
 }
