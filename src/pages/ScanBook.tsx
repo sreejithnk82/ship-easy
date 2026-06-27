@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
-import { ScanLine, FileSpreadsheet, Truck, Check, AlertTriangle, X, Pencil, Ban } from 'lucide-react';
+import { ScanLine, FileSpreadsheet, Truck, Check, AlertTriangle, X, Pencil, Ban, Camera } from 'lucide-react';
 import { api, Product, OpenOrder } from '../lib/api';
 import { useProfile, isAdmin, canScan } from '../lib/profile';
 import { useToast, useConfirm } from '../components/feedback';
+import { CameraScanner } from '../components/CameraScanner';
 import { istDateLabel, istDateTimeLabel } from '../lib/datetime';
 import { useActiveCustomer } from '../lib/activeCustomer';
 import { downloadDtdc, DtdcOrder } from '../lib/dtdc';
@@ -26,7 +27,14 @@ export const ScanBook = () => {
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<OpenOrder | null>(null);
   const [editForm, setEditForm] = useState({ name: '', phone: '', pincode: '', line1: '', line2: '', state: '', productId: '' });
+  const [showCamera, setShowCamera] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Live mirrors so the long-lived camera scanner reads current state, not a stale closure.
+  const openMapRef = useRef(openMap);
+  const scannedRef = useRef(scanned);
+  useEffect(() => { openMapRef.current = openMap; }, [openMap]);
+  useEffect(() => { scannedRef.current = scanned; }, [scanned]);
 
   useEffect(() => { if (customerId) load(); }, [customerId]);
 
@@ -47,21 +55,27 @@ export const ScanBook = () => {
     }
   };
 
-  const onScan = (raw: string) => {
+  // Shared by typed input and camera. Reads refs so it stays correct even when
+  // called from the long-lived camera modal. Returns the feedback it set.
+  const onScan = (raw: string): Flash => {
     const id = raw.trim();
-    if (!id) return;
+    if (!id) return null;
     setCode('');
-    inputRef.current?.focus();
 
-    const order = openMap.get(id);
-    if (!order) { setFlash({ kind: 'err', text: `Not found / wrong customer: ${id}` }); return; }
-    if (scanned.some((s) => s.trackingId === id)) { setFlash({ kind: 'warn', text: `Already scanned: ${id}` }); return; }
-    setScanned((prev) => [order, ...prev]);
-    if (order.exportedAt) {
-      setFlash({ kind: 'warn', text: `Added — ALREADY EXPORTED ${istDateLabel(order.exportedAt)}: ${order.receiverName}` });
+    const order = openMapRef.current.get(id);
+    let f: Flash;
+    if (!order) {
+      f = { kind: 'err', text: `Not found / wrong customer: ${id}` };
+    } else if (scannedRef.current.some((s) => s.trackingId === id)) {
+      f = { kind: 'warn', text: `Already scanned: ${id}` };
     } else {
-      setFlash({ kind: 'ok', text: `Added: ${order.receiverName} (${order.receiverState})` });
+      setScanned((prev) => [order, ...prev]);
+      f = order.exportedAt
+        ? { kind: 'warn', text: `Added — ALREADY EXPORTED ${istDateLabel(order.exportedAt)}: ${order.receiverName}` }
+        : { kind: 'ok', text: `Added: ${order.receiverName} (${order.receiverState})` };
     }
+    setFlash(f);
+    return f;
   };
 
   const removeScan = (id: string) => setScanned((prev) => prev.filter((s) => s.trackingId !== id));
@@ -219,6 +233,9 @@ export const ScanBook = () => {
           onChange={(e) => setCode(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') onScan(code); }}
         />
+        <button className="btn btn-outline" onClick={() => setShowCamera(true)} disabled={loading} style={{ marginTop: '0.75rem', width: '100%' }}>
+          <Camera size={18} /> Scan with camera
+        </button>
         {flash && (
           <div style={{ marginTop: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 600,
             color: flash.kind === 'ok' ? 'var(--success-color)' : flash.kind === 'warn' ? 'var(--warning-color)' : 'var(--danger-color)' }}>
@@ -296,6 +313,13 @@ export const ScanBook = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {showCamera && (
+        <CameraScanner
+          onDetected={onScan}
+          onClose={() => { setShowCamera(false); inputRef.current?.focus(); }}
+        />
       )}
     </div>
   );
