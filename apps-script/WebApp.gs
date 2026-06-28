@@ -113,6 +113,7 @@ function dispatch_(action, payload, ctx) {
     // superadmin onboarding
     case 'listCustomers':      return action_listCustomers_(payload, ctx);
     case 'createCustomer':     return action_createCustomer_(payload, ctx);
+    case 'updateCustomer':     return action_updateCustomer_(payload, ctx);
     case 'listHubCodes':       return action_listHubCodes_(payload, ctx);
     case 'addHubCode':         return action_addHubCode_(payload, ctx);
     case 'addUser':            return action_addUser_(payload, ctx);

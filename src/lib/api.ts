@@ -105,8 +105,9 @@ export interface Health { orderRows: number; columns: number; orderCells: number
 
 export interface Customer {
   customerId: string; name: string; spreadsheetId?: string;
-  senderPincode: string; senderName: string; senderCity: string;
-  senderState: string; hubCustomerCode: string; status: string;
+  senderPincode: string; senderName: string; senderPhone: string;
+  senderAddr1: string; senderAddr2: string; senderCity: string;
+  senderState: string; senderEmail: string; hubCustomerCode: string; status: string;
 }
 export interface UserRow { email: string; customerId: string; role: string; status: string; }
 export interface HubCode { code: string; label: string; }
@@ -165,6 +166,8 @@ export const api = {
   listCustomers: () => callApi<{ customers: Customer[] }>('listCustomers'),
   createCustomer: (customer: Partial<Customer> & { customerId: string; name: string }) =>
     callApi<{ customerId: string; spreadsheetUrl: string }>('createCustomer', { customer }),
+  updateCustomer: (customerId: string, fields: Partial<Customer>) =>
+    callApi<{ ok: true }>('updateCustomer', { customerId, fields }),
   listHubCodes: () => callApi<{ hubCodes: HubCode[] }>('listHubCodes'),
   addHubCode: (code: string, label?: string) => callApi<{ ok: true }>('addHubCode', { code, label }),
   addUser: (user: { email: string; customerId: string; role: string }) =>

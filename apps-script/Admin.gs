@@ -17,11 +17,47 @@ function action_listCustomers_(payload, ctx) {
     return {
       customerId: r.customer_id, name: r.name, spreadsheetId: r.spreadsheet_id,
       senderPincode: String(r.sender_pincode || ''), senderName: r.sender_name || '',
-      senderCity: r.sender_city || '', senderState: r.sender_state || '',
+      senderPhone: r.sender_phone || '', senderAddr1: r.sender_addr1 || '', senderAddr2: r.sender_addr2 || '',
+      senderCity: r.sender_city || '', senderState: r.sender_state || '', senderEmail: r.sender_email || '',
       hubCustomerCode: r.hub_customer_code || '', status: r.status || '',
     };
   });
   return { ok: true, customers: customers };
+}
+
+/**
+ * Edit a customer's directory row — everything except the immutable customer_id
+ * (the key that links users, the spreadsheet, and tracking ranges) and the
+ * spreadsheet_id (set at creation). Superadmin only.
+ */
+function action_updateCustomer_(payload, ctx) {
+  if (!requireSuperadmin_(ctx)) return forbidden_();
+  var customerId = payload.customerId;
+  var f = payload.fields || {};
+  if (!customerId) return badRequest_('customerId required');
+
+  // Map editable API fields → directory column names. customer_id / spreadsheet_id excluded.
+  var MAP = {
+    name: 'name', senderName: 'sender_name', senderPhone: 'sender_phone',
+    senderAddr1: 'sender_addr1', senderAddr2: 'sender_addr2', senderCity: 'sender_city',
+    senderState: 'sender_state', senderPincode: 'sender_pincode', senderEmail: 'sender_email',
+    hubCustomerCode: 'hub_customer_code', status: 'status',
+  };
+
+  var sheet = getSheetOrThrow_(getDirectorySpreadsheet_(), SHEETS.CUSTOMERS);
+  var data = readObjects_(sheet);
+  var row = data.rows.find(function (r) { return String(r.customer_id) === String(customerId); });
+  if (!row) return { ok: false, error: 'NOT_FOUND' };
+  if (f.name !== undefined && !String(f.name).trim()) return badRequest_('name cannot be blank');
+
+  var col = function (name) { return data.headers.indexOf(name) + 1; };
+  Object.keys(MAP).forEach(function (apiKey) {
+    if (f[apiKey] === undefined) return;
+    var c = col(MAP[apiKey]);
+    if (c > 0) sheet.getRange(row._row, c).setValue(f[apiKey]);
+  });
+  SpreadsheetApp.flush();
+  return { ok: true };
 }
 
 /** Create a customer: makes a new spreadsheet (with tabs) + a directory row. */

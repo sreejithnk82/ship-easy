@@ -36,6 +36,8 @@ export const SuperAdmin = () => {
   const [loading, setLoading] = useState(true);
 
   const [cust, setCust] = useState({ customerId: '', name: '', senderName: '', senderPhone: '', senderAddr1: '', senderAddr2: '', senderCity: '', senderState: '', senderPincode: '', senderEmail: '', hubCustomerCode: '' });
+  const [editCust, setEditCust] = useState<Customer | null>(null);
+  const [editCustForm, setEditCustForm] = useState({ name: '', senderName: '', senderPhone: '', senderAddr1: '', senderAddr2: '', senderCity: '', senderState: '', senderPincode: '', senderEmail: '', hubCustomerCode: '', status: '' });
   const [user, setUser] = useState({ email: '', customerId: '', role: 'member' });
   const [newHub, setNewHub] = useState({ code: '', label: '' });
 
@@ -102,6 +104,28 @@ export const SuperAdmin = () => {
       setCust({ customerId: '', name: '', senderName: '', senderPhone: '', senderAddr1: '', senderAddr2: '', senderCity: '', senderState: '', senderPincode: '', senderEmail: '', hubCustomerCode: '' });
       load();
     } catch (e: any) { notify('Create failed: ' + e.message, 'error'); } finally { setBusy(false); }
+  };
+
+  const openEditCust = (c: Customer) => {
+    setEditCust(c);
+    setEditCustForm({
+      name: c.name || '', senderName: c.senderName || '', senderPhone: c.senderPhone || '',
+      senderAddr1: c.senderAddr1 || '', senderAddr2: c.senderAddr2 || '', senderCity: c.senderCity || '',
+      senderState: c.senderState || '', senderPincode: c.senderPincode || '', senderEmail: c.senderEmail || '',
+      hubCustomerCode: c.hubCustomerCode || '', status: c.status || 'active',
+    });
+  };
+
+  const saveEditCust = async () => {
+    if (!editCust) return;
+    if (!editCustForm.name.trim()) { notify('Name is required.', 'error'); return; }
+    setBusy(true);
+    try {
+      await api.updateCustomer(editCust.customerId, editCustForm);
+      setEditCust(null);
+      notify('Customer updated.', 'success');
+      load();
+    } catch (e: any) { notify('Update failed: ' + e.message, 'error'); } finally { setBusy(false); }
   };
 
   const addUser = async () => {
@@ -227,10 +251,16 @@ export const SuperAdmin = () => {
             {loading && <p style={{ color: 'var(--text-secondary)' }}>Loading…</p>}
             {!loading && customers.length === 0 && <p style={{ color: 'var(--text-secondary)' }}>No customers yet.</p>}
             {customers.map((c) => (
-              <div key={c.customerId} style={{ padding: '0.5rem 0', borderBottom: '1px solid var(--border-color)' }}>
-                <strong>{c.name}</strong> <span className="badge badge-gray">{c.customerId}</span>
-                {c.spreadsheetId && <a href={`https://docs.google.com/spreadsheets/d/${c.spreadsheetId}`} target="_blank" rel="noreferrer" style={{ marginLeft: 8 }}><ExternalLink size={14} /></a>}
-                <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{c.senderCity} {c.senderPincode} · {c.hubCustomerCode}</div>
+              <div key={c.customerId} style={{ padding: '0.5rem 0', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <strong>{c.name}</strong> <span className="badge badge-gray">{c.customerId}</span>
+                  {c.status && c.status !== 'active' && <span className="badge badge-processing" style={{ marginLeft: 4 }}>{c.status}</span>}
+                  {c.spreadsheetId && <a href={`https://docs.google.com/spreadsheets/d/${c.spreadsheetId}`} target="_blank" rel="noreferrer" title="Open sheet" style={{ marginLeft: 8 }}><ExternalLink size={14} /></a>}
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{c.senderCity} {c.senderPincode} · {c.hubCustomerCode}</div>
+                </div>
+                {canWriteDirectory && (
+                  <button title="Edit details" onClick={() => openEditCust(c)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--primary-color)', padding: '0.25rem' }}><Pencil size={16} /></button>
+                )}
               </div>
             ))}
           </div>
@@ -401,6 +431,44 @@ export const SuperAdmin = () => {
             )}
           </div>
         </div>
+      )}
+
+      {/* Edit customer modal */}
+      {editCust && (
+        <Modal title={`Edit ${editCust.name}`} onClose={() => setEditCust(null)}>
+          <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: 0 }}>
+            Customer code <span className="badge badge-gray">{editCust.customerId}</span> can't be changed — it links users, the spreadsheet and tracking IDs.
+          </p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '0.5rem' }}>
+            <F label="Name *" v={editCustForm.name} on={(v) => setEditCustForm({ ...editCustForm, name: v })} />
+            <F label="Sender Name" v={editCustForm.senderName} on={(v) => setEditCustForm({ ...editCustForm, senderName: v })} />
+            <F label="Sender Phone" v={editCustForm.senderPhone} on={(v) => setEditCustForm({ ...editCustForm, senderPhone: v })} />
+            <F label="Address 1" v={editCustForm.senderAddr1} on={(v) => setEditCustForm({ ...editCustForm, senderAddr1: v })} />
+            <F label="Address 2" v={editCustForm.senderAddr2} on={(v) => setEditCustForm({ ...editCustForm, senderAddr2: v })} />
+            <F label="City" v={editCustForm.senderCity} on={(v) => setEditCustForm({ ...editCustForm, senderCity: v })} />
+            <F label="State" v={editCustForm.senderState} on={(v) => setEditCustForm({ ...editCustForm, senderState: v })} />
+            <F label="Pincode" v={editCustForm.senderPincode} on={(v) => setEditCustForm({ ...editCustForm, senderPincode: v })} />
+            <F label="Sender Email" v={editCustForm.senderEmail} on={(v) => setEditCustForm({ ...editCustForm, senderEmail: v })} />
+            <div className="input-group" style={{ margin: '0 0 0.6rem' }}>
+              <label className="input-label">Default Hub Code</label>
+              <select className="input-field" value={editCustForm.hubCustomerCode} onChange={(e) => setEditCustForm({ ...editCustForm, hubCustomerCode: e.target.value })}>
+                <option value="">— choose —</option>
+                {hubCodes.map((h) => <option key={h.code} value={h.code}>{h.code}{h.label ? ` (${h.label})` : ''}</option>)}
+              </select>
+            </div>
+            <div className="input-group" style={{ margin: '0 0 0.6rem' }}>
+              <label className="input-label">Status</label>
+              <select className="input-field" value={editCustForm.status} onChange={(e) => setEditCustForm({ ...editCustForm, status: e.target.value })}>
+                <option value="active">active</option>
+                <option value="paused">paused</option>
+              </select>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem' }}>
+            <button className="btn btn-outline" style={{ flex: 1 }} onClick={() => setEditCust(null)}>Cancel</button>
+            <button className="btn btn-primary" style={{ flex: 1 }} onClick={saveEditCust} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
+          </div>
+        </Modal>
       )}
 
       {/* Edit range modal */}
