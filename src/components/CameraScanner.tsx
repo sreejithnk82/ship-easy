@@ -12,6 +12,9 @@ export const CameraScanner = ({ onDetected, height = 280 }: { onDetected: (text:
   const lastRef = useRef<{ text: string; t: number }>({ text: '', t: 0 });
   const [error, setError] = useState('');
   const [last, setLast] = useState<ScanFeedback>(null);
+  // Diagnostics: the raw text of the most recent successful decode, so we can
+  // tell "camera isn't decoding anything" apart from "decoding but not matching".
+  const [rawSeen, setRawSeen] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -34,13 +37,23 @@ export const CameraScanner = ({ onDetected, height = 280 }: { onDetected: (text:
         const reader = new BrowserMultiFormatReader(hints);
         if (cancelled || !videoRef.current) return;
         controls = await reader.decodeFromConstraints(
-          // Ask for the rear camera at a decent resolution — low-res frames are the
-          // usual reason a barcode shows in the preview but never decodes.
-          { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } } },
+          // Rear camera, decent resolution, and CONTINUOUS AUTOFOCUS. A phone
+          // preview can look sharp to the eye while the bars are too blurry for
+          // the decoder — fixed-focus cameras are the usual reason a barcode
+          // shows in the preview but never decodes. focusMode isn't in the TS
+          // types yet, so the constraint object is cast.
+          {
+            video: {
+              facingMode: { ideal: 'environment' },
+              width: { ideal: 1280 }, height: { ideal: 720 },
+              advanced: [{ focusMode: 'continuous' }],
+            } as any,
+          },
           videoRef.current,
           (result) => {
             if (!result) return;
             const text = result.getText();
+            setRawSeen(text); // record every decode, even repeats — pure diagnostics
             const now = Date.now();
             if (text === lastRef.current.text && now - lastRef.current.t < 1500) return;
             lastRef.current = { text, t: now };
@@ -62,7 +75,7 @@ export const CameraScanner = ({ onDetected, height = 280 }: { onDetected: (text:
 
   return (
     <div style={{ position: 'relative', width: '100%', height, background: '#000', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
-      <video ref={videoRef} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted playsInline />
+      <video ref={videoRef} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted playsInline autoPlay />
       {!error && (
         <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
           <div style={{ width: '78%', maxWidth: 320, height: 96, border: '3px solid rgba(255,255,255,0.9)', borderRadius: 10 }} />
@@ -70,6 +83,12 @@ export const CameraScanner = ({ onDetected, height = 280 }: { onDetected: (text:
       )}
       {error && (
         <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', padding: '1.25rem', textAlign: 'center', fontSize: '0.85rem', lineHeight: 1.5 }}>{error}</div>
+      )}
+      {/* Live decode readout — proves the camera is reading even before a match. */}
+      {!error && (
+        <div style={{ position: 'absolute', left: 0, right: 0, top: 0, padding: '0.3rem 0.6rem', background: 'rgba(0,0,0,0.55)', textAlign: 'center', fontSize: '0.72rem', fontFamily: 'monospace', color: rawSeen ? '#9ae6b4' : '#9ca3af' }}>
+          {rawSeen ? `read: ${rawSeen}` : 'scanning… (no barcode read yet)'}
+        </div>
       )}
       <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '0.5rem 0.75rem', background: 'rgba(0,0,0,0.6)', textAlign: 'center', fontWeight: 600, fontSize: '0.85rem' }}>
         {last
