@@ -31,6 +31,7 @@ var SHEETS = {
   CUSTOMERS: 'Customers',
   USERS: 'Users',
   HUBCODES: 'HubCodes',
+  SERVICEABLE: 'ServiceablePincodes',
   PRODUCTS: 'Products',
   ADDRESSES: 'SenderAddresses',
   RANGES: 'TrackingRanges',

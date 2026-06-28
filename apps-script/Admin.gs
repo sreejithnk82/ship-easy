@@ -133,6 +133,26 @@ function action_addHubCode_(payload, ctx) {
   return { ok: true };
 }
 
+/* ------------------------- serviceable pincodes ------------------------ */
+
+var SERVICEABLE_HEADERS = ['pincode', 'city', 'note'];
+
+/**
+ * The full DTDC-serviceable pincode list (one global sheet in the Directory).
+ * Any signed-in user may read it — the app caches it locally and checks new
+ * bookings against it. Superadmins maintain the list directly in the sheet.
+ */
+function action_listServiceablePincodes_(payload, ctx) {
+  var sh = ensureSheet_(getDirectorySpreadsheet_(), SHEETS.SERVICEABLE, SERVICEABLE_HEADERS);
+  var rows = readObjects_(sh).rows;
+  var pincodes = [];
+  rows.forEach(function (r) {
+    var p = String(r.pincode == null ? '' : r.pincode).replace(/\D/g, '');
+    if (p.length === 6) pincodes.push(p);
+  });
+  return { ok: true, pincodes: pincodes };
+}
+
 /* -------------------------------- users -------------------------------- */
 
 function action_addUser_(payload, ctx) {

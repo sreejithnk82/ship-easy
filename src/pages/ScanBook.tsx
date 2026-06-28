@@ -8,6 +8,8 @@ import { istDateLabel, istDateTimeLabel } from '../lib/datetime';
 import { useActiveCustomer } from '../lib/activeCustomer';
 import { downloadDtdc, DtdcOrder } from '../lib/dtdc';
 import { stateFromPincode } from '../lib/pincode';
+import { validateContact } from '../lib/validate';
+import { isServiceable } from '../lib/serviceable';
 
 type Flash = { kind: 'ok' | 'warn' | 'err'; text: string } | null;
 
@@ -41,8 +43,17 @@ export const ScanBook = () => {
   // Live mirrors so the long-lived camera scanner reads current state, not a stale closure.
   const openMapRef = useRef(openMap);
   const scannedRef = useRef(scanned);
+  // Normalized index (whitespace stripped, uppercased) so a camera read like
+  // "r123 456" still matches the stored "R123456" — the usual reason a barcode
+  // decodes but nothing gets added.
+  const normMapRef = useRef<Map<string, OpenOrder>>(new Map());
   useEffect(() => { openMapRef.current = openMap; }, [openMap]);
   useEffect(() => { scannedRef.current = scanned; }, [scanned]);
+  useEffect(() => {
+    const m = new Map<string, OpenOrder>();
+    openMap.forEach((o, id) => m.set(normId(id), o));
+    normMapRef.current = m;
+  }, [openMap]);
 
   useEffect(() => { if (customerId) load(); }, [customerId]);
 
@@ -70,12 +81,13 @@ export const ScanBook = () => {
     if (!id) return null;
     setCode('');
 
-    const order = openMapRef.current.get(id);
+    // Exact match first, then a normalized (case/space-insensitive) fallback.
+    const order = openMapRef.current.get(id) || normMapRef.current.get(normId(id));
     let f: Flash;
     if (!order) {
       f = { kind: 'err', text: `Not found / wrong customer: ${id}` };
-    } else if (scannedRef.current.some((s) => s.trackingId === id)) {
-      f = { kind: 'warn', text: `Already scanned: ${id}` };
+    } else if (scannedRef.current.some((s) => s.trackingId === order.trackingId)) {
+      f = { kind: 'warn', text: `Already scanned: ${order.trackingId}` };
     } else {
       setScanned((prev) => [order, ...prev]);
       f = order.exportedAt
@@ -122,9 +134,10 @@ export const ScanBook = () => {
   const saveEdit = async () => {
     if (!editing) return;
     const e = editForm;
-    if (!e.name || !e.phone || !e.line1 || !e.line2 || e.pincode.replace(/\D/g, '').length !== 6) {
-      notify('Name, phone, both address lines and a valid pincode are required.', 'error'); return;
-    }
+    const problem = validateContact({ name: e.name, phone: e.phone, line1: e.line1, line2: e.line2 });
+    if (problem) { notify(problem, 'error'); return; }
+    if (e.pincode.replace(/\D/g, '').length !== 6) { notify('Enter a valid 6-digit pincode.', 'error'); return; }
+    if (!isServiceable(e.pincode)) { notify(`Pincode ${e.pincode.replace(/\D/g, '')} is not in the DTDC serviceable list.`, 'error'); return; }
     setBusy(true);
     const fields = {
       receiverName: e.name.trim(), receiverPhone: e.phone.trim(),
@@ -343,6 +356,12 @@ const EF = ({ label, v, on }: { label: string; v: string; on: (v: string) => voi
     <input className="input-field" value={v} onChange={(e) => on(e.target.value)} />
   </div>
 );
+
+// Strip everything but letters/digits and uppercase — used to match a scanned
+// barcode against stored tracking IDs regardless of stray spaces or case.
+function normId(s: string): string {
+  return String(s).replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+}
 
 function countBy<T>(arr: T[], key: (t: T) => string): Record<string, number> {
   return arr.reduce((acc, x) => { const k = key(x); acc[k] = (acc[k] || 0) + 1; return acc; }, {} as Record<string, number>);

@@ -15,6 +15,8 @@ import { Addresses } from './pages/Addresses';
 import { SuperAdmin } from './pages/SuperAdmin';
 import { ContactAdmin } from './pages/ContactAdmin';
 import { ReloadPrompt } from './ReloadPrompt';
+import { RefreshControl } from './components/RefreshControl';
+import { refreshServiceablePincodes } from './lib/serviceable';
 
 const Brand = () => (
   <div className="sidebar-logo"><Package size={26} /> ShipEasy</div>
@@ -57,7 +59,10 @@ const NavItems = ({ profile }: { profile: Profile | null }) => (
 
 const Layout = ({ profile, children, switcher }: { profile: Profile | null; children: React.ReactNode; switcher?: React.ReactNode }) => (
   <div className="app-layout">
-    <header className="top-navbar"><Brand /></header>
+    <header className="top-navbar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <Brand />
+      <RefreshControl variant="icon" />
+    </header>
     <aside className="sidebar">
       <Brand />
       <nav style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
@@ -68,6 +73,7 @@ const Layout = ({ profile, children, switcher }: { profile: Profile | null; chil
           <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-primary)', padding: '0 1rem 0.1rem' }}>{profile.customer.name}</div>
         )}
         <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', padding: '0 1rem 0.5rem' }}>{getEmail()}</div>
+        <RefreshControl variant="nav" />
         <button className="nav-link" onClick={signOut} style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', color: 'var(--text-secondary)' }}>
           <LogOut size={20} /> Logout
         </button>
@@ -135,6 +141,12 @@ const App = () => {
     initAuth().finally(() => setReady(true));
     return unsub;
   }, []);
+
+  // Keep the serviceable-pincode cache warm once signed in (booking validation
+  // reads it locally). Best-effort — the Refresh button forces it on demand.
+  useEffect(() => {
+    if (profile) refreshServiceablePincodes().catch(() => { /* ignore */ });
+  }, [profile?.email]);
 
   // Admins & superadmins act on a chosen group — load the list for the switcher.
   useEffect(() => {

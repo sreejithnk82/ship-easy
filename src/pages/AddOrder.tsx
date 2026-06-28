@@ -6,6 +6,8 @@ import { ApiError } from '../lib/api';
 import { useProfile } from '../lib/profile';
 import { useActiveCustomer } from '../lib/activeCustomer';
 import { stateFromPincode, isValidPincode } from '../lib/pincode';
+import { validateContact } from '../lib/validate';
+import { isServiceable } from '../lib/serviceable';
 import {
   addPending, listPending, deletePending, clearPending,
   newClientOrderId, PendingOrder, saveBatch,
@@ -81,8 +83,10 @@ export const AddOrder = () => {
   };
 
   const addToStack = async () => {
-    if (!f.name || !f.phone || !f.line1 || !f.line2) { notify('Name, phone, and both address lines are required.', 'error'); return; }
+    const problem = validateContact({ name: f.name, phone: f.phone, line1: f.line1, line2: f.line2 });
+    if (problem) { notify(problem, 'error'); return; }
     if (!isValidPincode(f.pincode)) { notify('Enter a valid 6-digit pincode.', 'error'); return; }
+    if (!isServiceable(f.pincode)) { notify(`Pincode ${f.pincode.replace(/\D/g, '')} is not in the DTDC serviceable list. Check the pincode, or refresh the list if it was recently added.`, 'error'); return; }
     if (!f.productId) { notify('Select a product.', 'error'); return; }
 
     const existing = editId ? pending.find((p) => p.clientOrderId === editId) : null;

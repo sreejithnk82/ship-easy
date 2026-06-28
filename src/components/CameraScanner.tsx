@@ -24,11 +24,19 @@ export const CameraScanner = ({ onDetected, height = 280 }: { onDetected: (text:
           import('@zxing/library'),
         ]);
         const hints = new Map();
-        hints.set(DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.CODE_128, BarcodeFormat.CODE_39]);
+        // Accept the common 1D symbologies couriers use (our labels are Code128).
+        // TRY_HARDER makes the decoder work harder per frame — slower but far more
+        // reliable on phone cameras that can't hold a crisp focus.
+        hints.set(DecodeHintType.POSSIBLE_FORMATS, [
+          BarcodeFormat.CODE_128, BarcodeFormat.CODE_39, BarcodeFormat.ITF, BarcodeFormat.CODABAR,
+        ]);
+        hints.set(DecodeHintType.TRY_HARDER, true);
         const reader = new BrowserMultiFormatReader(hints);
         if (cancelled || !videoRef.current) return;
         controls = await reader.decodeFromConstraints(
-          { video: { facingMode: { ideal: 'environment' } } },
+          // Ask for the rear camera at a decent resolution — low-res frames are the
+          // usual reason a barcode shows in the preview but never decodes.
+          { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } } },
           videoRef.current,
           (result) => {
             if (!result) return;

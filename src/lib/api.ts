@@ -168,6 +168,7 @@ export const api = {
     callApi<{ customerId: string; spreadsheetUrl: string }>('createCustomer', { customer }),
   updateCustomer: (customerId: string, fields: Partial<Customer>) =>
     callApi<{ ok: true }>('updateCustomer', { customerId, fields }),
+  listServiceablePincodes: () => callApi<{ pincodes: string[] }>('listServiceablePincodes'),
   listHubCodes: () => callApi<{ hubCodes: HubCode[] }>('listHubCodes'),
   addHubCode: (code: string, label?: string) => callApi<{ ok: true }>('addHubCode', { code, label }),
   addUser: (user: { email: string; customerId: string; role: string }) =>

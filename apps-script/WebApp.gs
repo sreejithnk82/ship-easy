@@ -63,6 +63,7 @@ var READ_ACTIONS_ = {
   getProfile: 1, listProducts: 1, listSenderAddresses: 1, listOpenOrders: 1,
   listOrders: 1, customerBalance: 1, listCustomers: 1, listHubCodes: 1,
   listUsers: 1, listTrackingRanges: 1, listBalances: 1, customerHealth: 1,
+  listServiceablePincodes: 1,
 };
 
 /** The maintenance message if the pause is on, else '' (off). */
@@ -115,6 +116,7 @@ function dispatch_(action, payload, ctx) {
     case 'createCustomer':     return action_createCustomer_(payload, ctx);
     case 'updateCustomer':     return action_updateCustomer_(payload, ctx);
     case 'listHubCodes':       return action_listHubCodes_(payload, ctx);
+    case 'listServiceablePincodes': return action_listServiceablePincodes_(payload, ctx);
     case 'addHubCode':         return action_addHubCode_(payload, ctx);
     case 'addUser':            return action_addUser_(payload, ctx);
     case 'listUsers':          return action_listUsers_(payload, ctx);
