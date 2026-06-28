@@ -6,7 +6,7 @@ import { ApiError } from '../lib/api';
 import { useProfile } from '../lib/profile';
 import { useActiveCustomer } from '../lib/activeCustomer';
 import { stateFromPincode, isValidPincode } from '../lib/pincode';
-import { validateContact } from '../lib/validate';
+import { validateContact, minChars, isValidIndianMobile } from '../lib/validate';
 import { isServiceable } from '../lib/serviceable';
 import {
   addPending, listPending, deletePending, clearPending,
@@ -34,6 +34,10 @@ export const AddOrder = () => {
   const [f, setF] = useState({ ...EMPTY });
   const [adding, setAdding] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
+  // True once the operator has run Auto-extract or tried to Add — gates the
+  // "captured / still needed" summary and the red field highlights, so a fresh
+  // empty form isn't shown all-red.
+  const [attempted, setAttempted] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [loadingProducts, setLoadingProducts] = useState(true);
   const [loadingBalance, setLoadingBalance] = useState(true);
@@ -73,9 +77,23 @@ export const AddOrder = () => {
     return k;
   };
 
+  // A valid single-line address (Line 1 only) shouldn't be blocked by the Line 2
+  // rule — fill Line 2 with "..." so it passes and the operator can edit it.
+  const withLine2Default = (form: typeof EMPTY) =>
+    minChars(form.line1) && !form.line2.trim() ? { ...form, line2: '...' } : form;
+
   const onParse = () => {
     const r = parseRawAddress(raw);
-    setF((prev) => ({ ...prev, name: r.name || prev.name, phone: r.phone || prev.phone, line1: r.address || prev.line1 }));
+    setF((prev) => withLine2Default({
+      ...prev,
+      name: r.name || prev.name,
+      phone: r.phone || prev.phone,
+      pincode: r.pincode || prev.pincode,
+      state: r.state || stateFromPincode(r.pincode) || prev.state,
+      line1: r.line1 || prev.line1,
+      line2: r.line2 || prev.line2,
+    }));
+    setAttempted(true);
   };
 
   const onPincode = (v: string) => {
@@ -83,32 +101,35 @@ export const AddOrder = () => {
   };
 
   const addToStack = async () => {
-    const problem = validateContact({ name: f.name, phone: f.phone, line1: f.line1, line2: f.line2 });
+    const ff = withLine2Default(f); // single-line address → Line 2 "..."
+    setAttempted(true);
+    const problem = validateContact({ name: ff.name, phone: ff.phone, line1: ff.line1, line2: ff.line2 });
     if (problem) { notify(problem, 'error'); return; }
-    if (!isValidPincode(f.pincode)) { notify('Enter a valid 6-digit pincode.', 'error'); return; }
-    if (!isServiceable(f.pincode)) { notify(`Pincode ${f.pincode.replace(/\D/g, '')} is not in the DTDC serviceable list. Check the pincode, or refresh the list if it was recently added.`, 'error'); return; }
-    if (!f.productId) { notify('Select a product.', 'error'); return; }
+    if (!isValidPincode(ff.pincode)) { notify('Enter a valid 6-digit pincode.', 'error'); return; }
+    if (!isServiceable(ff.pincode)) { notify(`Pincode ${ff.pincode.replace(/\D/g, '')} is not in the DTDC serviceable list. Check the pincode, or refresh the list if it was recently added.`, 'error'); return; }
+    if (!ff.productId) { notify('Select a product.', 'error'); return; }
 
     const existing = editId ? pending.find((p) => p.clientOrderId === editId) : null;
     const order: PendingOrder = {
       clientOrderId: editId || newClientOrderId(),
       customerId,
-      productId: f.productId,
-      receiverName: f.name.trim(),
-      receiverPhone: f.phone.trim(),
-      receiverPincode: f.pincode.replace(/\D/g, ''),
-      receiverLine1: f.line1.trim(),
-      receiverLine2: f.line2.trim(),
-      receiverState: (f.state || stateFromPincode(f.pincode)).trim(),
+      productId: ff.productId,
+      receiverName: ff.name.trim(),
+      receiverPhone: ff.phone.trim(),
+      receiverPincode: ff.pincode.replace(/\D/g, ''),
+      receiverLine1: ff.line1.trim(),
+      receiverLine2: ff.line2.trim(),
+      receiverState: (ff.state || stateFromPincode(ff.pincode)).trim(),
       createdAt: existing?.createdAt ?? Date.now(),
     };
     await addPending(order); // put() upserts by clientOrderId
-    setRaw(''); setF({ ...EMPTY }); setAdding(false); setEditId(null);
+    setRaw(''); setF({ ...EMPTY }); setAdding(false); setEditId(null); setAttempted(false);
     refresh();
   };
 
   const startEdit = (o: PendingOrder) => {
     setEditId(o.clientOrderId);
+    setAttempted(false);
     setF({
       name: o.receiverName, phone: o.receiverPhone, pincode: o.receiverPincode,
       line1: o.receiverLine1, line2: o.receiverLine2, state: o.receiverState, productId: o.productId,
@@ -180,6 +201,25 @@ export const AddOrder = () => {
   // Only verified products can be booked (members add products as "pending").
   const bookable = products.filter((p) => p.status !== 'pending');
 
+  // Field-level validity → drives the inline red highlights and the post-extract
+  // "captured / still needed" summary. Only surfaced once `attempted`.
+  const errs = {
+    name: minChars(f.name) ? '' : 'Min 3 characters',
+    phone: isValidIndianMobile(f.phone) ? '' : 'Enter a valid Indian mobile number',
+    pincode: !isValidPincode(f.pincode) ? 'Enter a valid 6-digit pincode'
+      : !isServiceable(f.pincode) ? 'Not in the serviceable list' : '',
+    line1: minChars(f.line1) ? '' : 'Min 3 characters',
+    line2: minChars(f.line2) ? '' : 'Min 3 characters',
+  };
+  const err = (k: keyof typeof errs) => (attempted ? errs[k] : '');
+  const SUMMARY: [keyof typeof errs, string][] = [
+    ['name', 'Name'], ['phone', 'Phone'], ['pincode', 'Pincode'],
+    ['line1', 'Address Line 1'], ['line2', 'Address Line 2'],
+  ];
+  const needed = SUMMARY.filter(([k]) => errs[k]).map(([, l]) => l);
+  const captured = SUMMARY.filter(([k]) => !errs[k]).map(([, l]) => l);
+  const nothingParsed = !f.name.trim() && !f.phone.trim() && !f.pincode.trim() && !f.line1.trim();
+
   if (!customerId) {
     return <div><h1 className="page-title">Book Orders</h1>
       <p style={{ color: 'var(--text-secondary)' }}>Select a customer in the "Acting as" bar above to start booking.</p></div>;
@@ -189,7 +229,7 @@ export const AddOrder = () => {
     <div style={{ paddingBottom: '5rem' }}>
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h1 className="page-title" style={{ margin: 0 }}>Book Orders</h1>
-        <button className="btn btn-primary" onClick={() => { if (adding) { setEditId(null); setF({ ...EMPTY }); } setAdding(!adding); }} style={{ width: 'auto' }}>
+        <button className="btn btn-primary" onClick={() => { if (adding) { setEditId(null); setF({ ...EMPTY }); } setAttempted(false); setAdding(!adding); }} style={{ width: 'auto' }}>
           {adding ? 'Close' : '+ Add Order'}
         </button>
       </div>
@@ -220,21 +260,38 @@ export const AddOrder = () => {
           </div>
           <button className="btn btn-outline" onClick={onParse} style={{ marginBottom: '1rem' }}><Wand2 size={16} /> Auto-extract</button>
 
+          {attempted && (
+            nothingParsed ? (
+              <div style={{ marginBottom: '1rem', padding: '0.6rem 0.9rem', display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'rgba(239,68,68,0.1)', border: '1px solid var(--danger-color)', borderRadius: 'var(--radius-md)', color: 'var(--danger-color)', fontSize: '0.85rem', fontWeight: 600 }}>
+                <AlertCircle size={16} style={{ flexShrink: 0 }} /> Couldn't read this message — please fill the form manually.
+              </div>
+            ) : (
+              <div style={{ marginBottom: '1rem', padding: '0.6rem 0.9rem', background: 'var(--bg-color)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', fontSize: '0.82rem', lineHeight: 1.6 }}>
+                {captured.length > 0 && <div style={{ color: 'var(--success-color)', fontWeight: 600 }}>Captured: {captured.join(', ')}</div>}
+                {needed.length > 0
+                  ? <div style={{ color: 'var(--warning-color)', fontWeight: 600 }}>Still needed: {needed.join(', ')}</div>
+                  : <div style={{ color: 'var(--success-color)', fontWeight: 600 }}>All set — review and Add.</div>}
+              </div>
+            )
+          )}
+
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '1rem' }}>
-            <In label="Name *" v={f.name} on={(v) => setF({ ...f, name: v })} />
-            <In label="Phone *" v={f.phone} on={(v) => setF({ ...f, phone: v })} />
-            <In label="Pincode *" v={f.pincode} on={onPincode} />
+            <In label="Name *" v={f.name} on={(v) => setF({ ...f, name: v })} error={err('name')} />
+            <In label="Phone *" v={f.phone} on={(v) => setF({ ...f, phone: v })} error={err('phone')} />
+            <In label="Pincode *" v={f.pincode} on={onPincode} error={err('pincode')} />
             <In label="State (auto)" v={f.state} on={(v) => setF({ ...f, state: v })} />
           </div>
-          <In label="Address Line 1 *" v={f.line1} on={(v) => setF({ ...f, line1: v })} />
-          <In label="Address Line 2 *" v={f.line2} on={(v) => setF({ ...f, line2: v })} />
+          <In label="Address Line 1 *" v={f.line1} on={(v) => setF({ ...f, line1: v })} error={err('line1')} />
+          <In label="Address Line 2 *" v={f.line2} on={(v) => setF({ ...f, line2: v })} error={err('line2')} />
 
           <div className="input-group">
             <label className="input-label">Product *</label>
-            <select className="input-field" value={f.productId} onChange={(e) => setF({ ...f, productId: e.target.value })}>
+            <select className="input-field" value={f.productId} onChange={(e) => setF({ ...f, productId: e.target.value })}
+              style={attempted && !f.productId ? { borderColor: 'var(--danger-color)' } : undefined}>
               <option value="">-- Choose --</option>
               {bookable.map((p) => <option key={p.productId} value={p.productId}>{p.name} ({p.weightG}g)</option>)}
             </select>
+            {attempted && !f.productId && <div style={{ color: 'var(--danger-color)', fontSize: '0.75rem', marginTop: '0.25rem' }}>Select a product</div>}
           </div>
 
           <button className="btn btn-primary" onClick={addToStack} style={{ width: '100%' }}>
@@ -324,9 +381,11 @@ export const AddOrder = () => {
   );
 };
 
-const In = ({ label, v, on }: { label: string; v: string; on: (v: string) => void }) => (
+const In = ({ label, v, on, error }: { label: string; v: string; on: (v: string) => void; error?: string }) => (
   <div className="input-group" style={{ margin: '0 0 0.75rem' }}>
     <label className="input-label">{label}</label>
-    <input className="input-field" value={v} onChange={(e) => on(e.target.value)} />
+    <input className="input-field" value={v} onChange={(e) => on(e.target.value)}
+      style={error ? { borderColor: 'var(--danger-color)' } : undefined} />
+    {error && <div style={{ color: 'var(--danger-color)', fontSize: '0.75rem', marginTop: '0.25rem' }}>{error}</div>}
   </div>
 );
