@@ -37,6 +37,14 @@ function doPost(e) {
       role: String(user.role || 'member').trim(),
       customerId: user.customer_id,
     };
+
+    // Maintenance pause: when MAINTENANCE_MODE is set, block write actions for
+    // everyone except superadmin. Reads still work (so the app shows a banner).
+    var maint = maintenanceMessage_();
+    if (maint && ctx.role !== 'superadmin' && !READ_ACTIONS_[body.action]) {
+      return jsonOut_({ ok: false, error: 'MAINTENANCE', detail: maint });
+    }
+
     return jsonOut_(dispatch_(body.action, body.payload || {}, ctx));
   } catch (err) {
     return jsonOut_({ ok: false, error: 'INTERNAL', detail: String((err && err.message) || err) });
@@ -48,6 +56,38 @@ function doGet(e) {
   return jsonOut_({ ok: true, service: 'ship-easy', status: 'up' });
 }
 
+/* ---------------------------- maintenance ---------------------------- */
+// Read-only actions allowed during a maintenance pause (everything else is a
+// write and is blocked for non-superadmins while MAINTENANCE_MODE is set).
+var READ_ACTIONS_ = {
+  getProfile: 1, listProducts: 1, listSenderAddresses: 1, listOpenOrders: 1,
+  listOrders: 1, customerBalance: 1, listCustomers: 1, listHubCodes: 1,
+  listUsers: 1, listTrackingRanges: 1, listBalances: 1, customerHealth: 1,
+};
+
+/** The maintenance message if the pause is on, else '' (off). */
+function maintenanceMessage_() {
+  return PropertiesService.getScriptProperties().getProperty('MAINTENANCE_MODE') || '';
+}
+
+/** Toggle from the editor. setMaintenance('msg') turns it on; setMaintenance('') off. */
+function setMaintenance(msg) {
+  var props = PropertiesService.getScriptProperties();
+  if (msg) { props.setProperty('MAINTENANCE_MODE', String(msg)); return 'Maintenance ON: ' + msg; }
+  props.deleteProperty('MAINTENANCE_MODE');
+  return 'Maintenance OFF';
+}
+
+/** One-click ON (default message) — run from the editor. */
+function maintenanceOn() {
+  return setMaintenance('We are doing a quick maintenance — changes are paused, please try again shortly.');
+}
+
+/** One-click OFF — run from the editor. */
+function maintenanceOff() {
+  return setMaintenance('');
+}
+
 /* ------------------------------ dispatch ------------------------------ */
 
 function dispatch_(action, payload, ctx) {
@@ -57,6 +97,7 @@ function dispatch_(action, payload, ctx) {
     case 'addProduct':     return action_addProduct_(payload, ctx);
     case 'updateProduct':  return action_updateProduct_(payload, ctx);
     case 'deleteProduct':  return action_deleteProduct_(payload, ctx);
+    case 'verifyProduct':  return action_verifyProduct_(payload, ctx);
     case 'listSenderAddresses':  return action_listSenderAddresses_(payload, ctx);
     case 'addSenderAddress':     return action_addSenderAddress_(payload, ctx);
     case 'updateSenderAddress':  return action_updateSenderAddress_(payload, ctx);
@@ -92,8 +133,9 @@ function action_generateLabels_(payload, ctx) {
   var customerId = payload.customerId;
   if (!customerId) return { ok: false, error: 'BAD_REQUEST', detail: 'customerId is required.' };
 
-  // Authorization: the caller must belong to that customer (or be superadmin).
-  if (ctx.role !== 'superadmin' && String(ctx.customerId) !== String(customerId)) {
+  // Authorization: the caller must belong to that customer (or be admin/superadmin,
+  // who are global and may book for any group).
+  if (!isAdmin_(ctx) && String(ctx.customerId) !== String(customerId)) {
     return { ok: false, error: 'FORBIDDEN', detail: 'Not a member of this customer.' };
   }
 

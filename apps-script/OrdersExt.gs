@@ -174,7 +174,7 @@ function action_customerBalance_(payload, ctx) {
 
 /** Remaining IDs for every customer — superadmin top-up dashboard. */
 function action_listBalances_(payload, ctx) {
-  if (!requireSuperadmin_(ctx)) return forbidden_();
+  if (!isAdmin_(ctx)) return forbidden_();
   var rows = readObjects_(getSheetOrThrow_(getDirectorySpreadsheet_(), SHEETS.CUSTOMERS)).rows;
   var balances = rows.map(function (r) {
     var remaining = -1;
@@ -193,7 +193,7 @@ var ORDERS_ARCHIVE = 'OrdersArchive';
 
 /** Orders row/cell count for one customer vs the 10M-cell spreadsheet ceiling. */
 function action_customerHealth_(payload, ctx) {
-  if (!requireSuperadmin_(ctx)) return forbidden_();
+  if (!isAdmin_(ctx)) return forbidden_();
   var c = resolveCustomerId_(payload, ctx);
   if (c.error) return c.error;
   var sheet = getSheetOrThrow_(getCustomerSpreadsheet_(c.id), SHEETS.ORDERS);
@@ -214,7 +214,7 @@ function action_customerHealth_(payload, ctx) {
  * Open ('labeled') orders are never touched.
  */
 function action_archiveOrders_(payload, ctx) {
-  if (!requireSuperadmin_(ctx)) return forbidden_();
+  if (!isAdmin_(ctx)) return forbidden_();
   var c = resolveCustomerId_(payload, ctx);
   if (c.error) return c.error;
   var beforeISO = String(payload.beforeISO || '');

@@ -4,7 +4,7 @@ import {
   Pencil, Trash2, Pause, Play, ArrowRightLeft, X, Activity, Database, Archive,
 } from 'lucide-react';
 import { api, Customer, UserRow, TrackingRange, HubCode, Balance, Health, ApiError } from '../lib/api';
-import { useProfile } from '../lib/profile';
+import { useProfile, isAdmin } from '../lib/profile';
 import { useToast, useConfirm } from '../components/feedback';
 import { istDayKey } from '../lib/datetime';
 
@@ -106,7 +106,8 @@ export const SuperAdmin = () => {
 
   const addUser = async () => {
     if (!user.email) { notify('Email required.', 'error'); return; }
-    if (user.role !== 'superadmin' && !user.customerId) { notify('Pick a customer for non-superadmins.', 'error'); return; }
+    const needsGroup = user.role === 'member' || user.role === 'operator';
+    if (needsGroup && !user.customerId) { notify('Pick a group for members/operators.', 'error'); return; }
     setBusy(true);
     try { await api.addUser(user); setUser({ email: '', customerId: '', role: 'member' }); load(); notify('User added.', 'success'); }
     catch (e: any) { notify('Add user failed: ' + e.message, 'error'); } finally { setBusy(false); }
@@ -177,7 +178,10 @@ export const SuperAdmin = () => {
     } catch (e: any) { notify(rangeErr(e), 'error'); } finally { setBusy(false); }
   };
 
-  if (profile?.role !== 'superadmin') return <div className="page-title">Superadmins only.</div>;
+  // Admins see Master Admin too, but read-only on the directory (Customers / Users /
+  // Hub Codes). Only superadmins can create those. Tracking IDs + Health are full for both.
+  const canWriteDirectory = profile?.role === 'superadmin';
+  if (!isAdmin(profile)) return <div className="page-title">Admins only.</div>;
 
   return (
     <div className="fade-in" style={{ paddingBottom: '4rem' }}>
@@ -194,6 +198,7 @@ export const SuperAdmin = () => {
       {/* CUSTOMERS */}
       {tab === 'customers' && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))', gap: '1.5rem' }}>
+          {canWriteDirectory && (
           <div className="glass-card">
             <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: 0 }}><Building2 size={20} /> Create Customer</h3>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '0.75rem' }}>
@@ -215,6 +220,7 @@ export const SuperAdmin = () => {
             </div>
             <button className="btn btn-primary" onClick={createCustomer} disabled={busy} style={{ marginTop: '1rem' }}><Save size={16} /> Create</button>
           </div>
+          )}
 
           <div className="glass-card">
             <h3 style={{ marginTop: 0 }}>Customers ({customers.length})</h3>
@@ -232,32 +238,37 @@ export const SuperAdmin = () => {
       )}
 
       {/* USERS */}
-      {tab === 'users' && (
+      {tab === 'users' && (() => {
+        // admin & superadmin are global (no single group); member & operator need a group.
+        const userIsGlobal = user.role === 'superadmin' || user.role === 'admin';
+        return (
         <div className="glass-card" style={{ maxWidth: 560 }}>
+          {canWriteDirectory && (<>
           <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: 0 }}><UserPlus size={20} /> Add User</h3>
           <F label="Email *" v={user.email} on={(v) => setUser({ ...user, email: v })} />
           <div className="input-group">
             <label className="input-label">Role</label>
             <select className="input-field" value={user.role}
-              onChange={(e) => setUser({ ...user, role: e.target.value, customerId: e.target.value === 'superadmin' ? '' : user.customerId })}>
+              onChange={(e) => setUser({ ...user, role: e.target.value, customerId: (e.target.value === 'superadmin' || e.target.value === 'admin') ? '' : user.customerId })}>
               <option value="member">member</option><option value="admin">admin</option><option value="operator">operator</option><option value="superadmin">superadmin</option>
             </select>
           </div>
           <div className="input-group">
-            <label className="input-label">Customer {user.role !== 'superadmin' ? '*' : '(optional)'}</label>
-            <select className="input-field" value={user.customerId} disabled={user.role === 'superadmin'}
+            <label className="input-label">Group {userIsGlobal ? '(optional)' : '*'}</label>
+            <select className="input-field" value={user.customerId} disabled={userIsGlobal}
               onChange={(e) => setUser({ ...user, customerId: e.target.value })}
-              style={user.role === 'superadmin' ? { opacity: 0.6 } : undefined}>
-              <option value="">{user.role === 'superadmin' ? '— none (all customers) —' : '— choose a customer —'}</option>
+              style={userIsGlobal ? { opacity: 0.6 } : undefined}>
+              <option value="">{userIsGlobal ? '— none (all groups) —' : '— choose a group —'}</option>
               {customers.map((c) => <option key={c.customerId} value={c.customerId}>{c.name} ({c.customerId})</option>)}
             </select>
           </div>
-          {user.role !== 'superadmin' && !user.customerId && (
+          {!userIsGlobal && !user.customerId && (
             <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: '0 0 0.75rem' }}>
-              {user.role}s belong to one customer — pick the customer they'll work under.
+              {user.role}s belong to one group — pick the group they'll work under.
             </p>
           )}
-          <button className="btn btn-primary" onClick={addUser} disabled={busy || (user.role !== 'superadmin' && !user.customerId) || !user.email}><Save size={16} /> Add User</button>
+          <button className="btn btn-primary" onClick={addUser} disabled={busy || (!userIsGlobal && !user.customerId) || !user.email}><Save size={16} /> Add User</button>
+          </>)}
           <h4 style={{ marginBottom: '0.5rem' }}>Users ({users.length})</h4>
           <div style={{ fontSize: '0.85rem' }}>
             {loading && <div style={{ color: 'var(--text-secondary)' }}>Loading…</div>}
@@ -265,18 +276,21 @@ export const SuperAdmin = () => {
             {users.map((u) => <div key={u.email} style={{ padding: '0.2rem 0' }}>{u.email} — <strong>{u.role}</strong>{u.customerId ? ` · ${u.customerId}` : ''}</div>)}
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* HUB CODES */}
       {tab === 'hubs' && (
         <div className="glass-card" style={{ maxWidth: 560 }}>
           <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: 0 }}><Truck size={20} /> Hub Customer Codes</h3>
           <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: 0 }}>Your DTDC account codes. Many customers can share one.</p>
+          {canWriteDirectory && (<>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '0.75rem' }}>
             <F label="Hub Code *" v={newHub.code} on={(v) => setNewHub({ ...newHub, code: v })} ph="OF2357C004" />
             <F label="Label" v={newHub.label} on={(v) => setNewHub({ ...newHub, label: v })} ph="optional" />
           </div>
           <button className="btn btn-primary" onClick={addHubCode} disabled={busy} style={{ marginTop: '0.5rem' }}><Save size={16} /> Add Hub Code</button>
+          </>)}
           <div style={{ marginTop: '1rem', fontSize: '0.85rem' }}>
             {loading && <div style={{ color: 'var(--text-secondary)' }}>Loading…</div>}
             {hubCodes.map((h) => <div key={h.code} style={{ padding: '0.25rem 0', borderBottom: '1px solid var(--border-color)' }}><strong>{h.code}</strong>{h.label ? ` — ${h.label}` : ''}</div>)}

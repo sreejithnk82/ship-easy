@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Package, Save, Plus, X, Pencil, Trash2, MapPin } from 'lucide-react';
+import { Package, Save, Plus, X, Pencil, Trash2, MapPin, BadgeCheck, Clock } from 'lucide-react';
 import { api, Product, HubCode, SenderAddress } from '../lib/api';
 import { ApiError } from '../lib/api';
-import { useProfile } from '../lib/profile';
+import { useProfile, isAdmin } from '../lib/profile';
 import { useActiveCustomer } from '../lib/activeCustomer';
 import { NEW_ADDRESS_KEY } from './Addresses';
 import { useToast, useConfirm } from '../components/feedback';
@@ -26,7 +26,10 @@ export const Products = () => {
   const navigate = useNavigate();
   const { activeId } = useActiveCustomer();
   const customerId = profile?.customerId || activeId;
-  const admin = profile?.role === 'superadmin'; // only superadmins manage products
+  // Members can add/edit products (they start "pending"); admins & superadmins
+  // can verify, and delete.
+  const canManage = profile?.role === 'member' || isAdmin(profile);
+  const canVerify = isAdmin(profile);
   const notify = useToast();
   const confirm = useConfirm();
   const [products, setProducts] = useState<Product[]>([]);
@@ -138,6 +141,16 @@ export const Products = () => {
     }
   };
 
+  const verify = async (p: Product) => {
+    try {
+      await api.verifyProduct(p.productId, true, customerId);
+      notify(`Verified "${p.name}".`, 'success');
+      load();
+    } catch (e: any) {
+      notify('Verify failed: ' + e.message, 'error');
+    }
+  };
+
   const set = (k: keyof FormState) => (v: string) => setForm((f) => ({ ...f, [k]: v }));
 
   if (!customerId) {
@@ -151,14 +164,20 @@ export const Products = () => {
         <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', margin: 0 }}>
           <Package size={28} style={{ color: 'var(--primary-color)' }} /> Products
         </h1>
-        {admin && (
+        {canManage && (
           <button className="btn btn-primary" onClick={() => (showForm ? closeForm() : openNew())}>
             {showForm ? <X size={18} /> : <Plus size={18} />} {showForm ? 'Close' : 'Add Product'}
           </button>
         )}
       </div>
 
-      {showForm && admin && (
+      {!canVerify && canManage && (
+        <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', margin: '0 0 1rem' }}>
+          Products you add (or edit) start as <strong>Pending</strong> and can't be booked until an admin verifies them.
+        </p>
+      )}
+
+      {showForm && canManage && (
         <div className="glass-card" style={{ marginBottom: '2rem' }}>
           <h3 style={{ marginBottom: '1rem' }}>{editingId ? 'Edit Product' : 'Add Product'}</h3>
 
@@ -204,21 +223,29 @@ export const Products = () => {
         {loading ? <p style={{ color: 'var(--text-secondary)' }}>Loading…</p>
           : products.length === 0 ? <p style={{ color: 'var(--text-secondary)' }}>No products yet.</p>
           : products.map((p) => (
-            <div key={p.productId} className="glass-card" style={{ padding: '1.25rem', position: 'relative' }}>
-              {admin && (
-                <div style={{ position: 'absolute', top: '1rem', right: '1rem', display: 'flex', gap: '0.25rem' }}>
-                  <button onClick={() => startEdit(p)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--primary-color)' }}><Pencil size={16} /></button>
-                  <button onClick={() => remove(p)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger-color)' }}><Trash2 size={16} /></button>
+            <div key={p.productId} className="glass-card" style={{ padding: '1.25rem', position: 'relative', borderLeft: p.status === 'pending' ? '4px solid var(--warning-color)' : undefined }}>
+              {canManage && (
+                <div style={{ position: 'absolute', top: '0.85rem', right: '0.85rem', display: 'flex', gap: '0.75rem' }}>
+                  <button title="Edit" onClick={() => startEdit(p)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--primary-color)', padding: '0.2rem' }}><Pencil size={17} /></button>
+                  {canVerify && <button title="Delete" onClick={() => remove(p)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger-color)', padding: '0.2rem' }}><Trash2 size={17} /></button>}
                 </div>
               )}
-              <h4 style={{ margin: '0 0 0.25rem 0', paddingRight: admin ? '3.5rem' : 0 }}>{p.name}</h4>
+              <h4 style={{ margin: '0 0 0.25rem 0', paddingRight: canManage ? (canVerify ? '4.5rem' : '2.5rem') : 0 }}>{p.name}</h4>
               <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>{p.senderName} · {p.hubCustomerCode}</div>
               <p style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--primary-color)', margin: '0 0 1rem 0' }}>₹{p.declaredValue}</p>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
+                {p.status === 'pending'
+                  ? <span className="badge badge-processing" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}><Clock size={12} /> Pending</span>
+                  : <span className="badge badge-completed" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}><BadgeCheck size={12} /> Verified</span>}
                 <span className="badge badge-gray">{p.weightG}g</span>
                 <span className="badge badge-gray">{p.content}</span>
                 {(p.lengthCm || p.widthCm || p.heightCm) ? <span className="badge badge-gray">{p.lengthCm}×{p.widthCm}×{p.heightCm}cm</span> : null}
               </div>
+              {canVerify && p.status === 'pending' && (
+                <button className="btn btn-primary" onClick={() => verify(p)} style={{ marginTop: '1rem', width: '100%' }}>
+                  <BadgeCheck size={16} /> Verify product
+                </button>
+              )}
             </div>
           ))}
       </div>

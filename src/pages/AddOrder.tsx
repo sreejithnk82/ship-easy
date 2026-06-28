@@ -173,6 +173,8 @@ export const AddOrder = () => {
   };
 
   const productById = new Map(products.map((p) => [p.productId, p]));
+  // Only verified products can be booked (members add products as "pending").
+  const bookable = products.filter((p) => p.status !== 'pending');
 
   if (!customerId) {
     return <div><h1 className="page-title">Book Orders</h1>
@@ -190,9 +192,11 @@ export const AddOrder = () => {
 
       {loadingProducts ? (
         <div style={{ padding: '1rem', marginBottom: '1.5rem', color: 'var(--text-secondary)' }}>Loading products…</div>
-      ) : products.length === 0 ? (
+      ) : bookable.length === 0 ? (
         <div style={{ padding: '1rem', marginBottom: '1.5rem', background: 'rgba(245,158,11,0.1)', border: '1px solid var(--warning-color)', borderRadius: 'var(--radius-lg)', color: 'var(--warning-color)', display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          <AlertCircle size={24} /> <span>No products yet — add one under Products before booking.</span>
+          <AlertCircle size={24} /> <span>{products.length === 0
+            ? 'No products yet — add one under Products before booking.'
+            : 'No verified products yet — an admin must verify a product before it can be booked.'}</span>
         </div>
       ) : null}
 
@@ -225,7 +229,7 @@ export const AddOrder = () => {
             <label className="input-label">Product *</label>
             <select className="input-field" value={f.productId} onChange={(e) => setF({ ...f, productId: e.target.value })}>
               <option value="">-- Choose --</option>
-              {products.map((p) => <option key={p.productId} value={p.productId}>{p.name} ({p.weightG}g)</option>)}
+              {bookable.map((p) => <option key={p.productId} value={p.productId}>{p.name} ({p.weightG}g)</option>)}
             </select>
           </div>
 

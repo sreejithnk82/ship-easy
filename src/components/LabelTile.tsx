@@ -58,7 +58,7 @@ export const LabelTile = ({ order, product, scale = 1 }: { order: LabelOrder; pr
         <div style={{ position: 'absolute', left: 0, top: 362, width: W, borderTop: '1px solid #000' }} />
 
         {/* Product */}
-        <Abs l={12} t={372} w={264} size={12}>{f.productDesc}</Abs>
+        <Abs l={12} t={372} w={264} size={12}>{f.productName}</Abs>
       </div>
     </div>
   );

@@ -154,12 +154,12 @@ export const Addresses = () => {
           : addresses.map((a) => (
             <div key={a.addressId} className="glass-card" style={{ padding: '1.25rem', position: 'relative' }}>
               {admin && (
-                <div style={{ position: 'absolute', top: '1rem', right: '1rem', display: 'flex', gap: '0.25rem' }}>
-                  <button onClick={() => startEdit(a)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--primary-color)' }}><Pencil size={16} /></button>
-                  <button onClick={() => remove(a)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger-color)' }}><Trash2 size={16} /></button>
+                <div style={{ position: 'absolute', top: '0.85rem', right: '0.85rem', display: 'flex', gap: '0.75rem' }}>
+                  <button title="Edit" onClick={() => startEdit(a)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--primary-color)', padding: '0.2rem' }}><Pencil size={17} /></button>
+                  <button title="Delete" onClick={() => remove(a)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger-color)', padding: '0.2rem' }}><Trash2 size={17} /></button>
                 </div>
               )}
-              <h4 style={{ margin: '0 0 0.25rem 0', paddingRight: admin ? '3.5rem' : 0 }}>{a.label || a.senderName}</h4>
+              <h4 style={{ margin: '0 0 0.25rem 0', paddingRight: admin ? '4.5rem' : 0 }}>{a.label || a.senderName}</h4>
               <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{a.senderName}{a.senderPhone ? ` · ${a.senderPhone}` : ''}</div>
               <p style={{ margin: '0.5rem 0 0', fontSize: '0.85rem' }}>{[a.senderAddr1, a.senderAddr2].filter(Boolean).join(', ')}</p>
               <p style={{ margin: '0.25rem 0 0', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{[a.senderCity, a.senderState, a.senderPincode].filter(Boolean).join(' · ')}</p>

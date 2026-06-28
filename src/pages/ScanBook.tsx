@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { ScanLine, FileSpreadsheet, Truck, Check, AlertTriangle, X, Pencil, Ban, Camera } from 'lucide-react';
+import { ScanLine, FileSpreadsheet, Truck, Check, AlertTriangle, X, Pencil, Ban, Camera, Keyboard } from 'lucide-react';
 import { api, Product, OpenOrder } from '../lib/api';
 import { useProfile, isAdmin, canScan } from '../lib/profile';
 import { useToast, useConfirm } from '../components/feedback';
@@ -27,8 +27,16 @@ export const ScanBook = () => {
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<OpenOrder | null>(null);
   const [editForm, setEditForm] = useState({ name: '', phone: '', pincode: '', line1: '', line2: '', state: '', productId: '' });
-  const [showCamera, setShowCamera] = useState(false);
+  const [mode, setMode] = useState<'type' | 'camera'>(() => {
+    try { return localStorage.getItem('shipeasy.scanMode') === 'camera' ? 'camera' : 'type'; } catch { return 'type'; }
+  });
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const changeMode = (m: 'type' | 'camera') => {
+    setMode(m);
+    try { localStorage.setItem('shipeasy.scanMode', m); } catch { /* ignore */ }
+    if (m === 'type') setTimeout(() => inputRef.current?.focus(), 0);
+  };
 
   // Live mirrors so the long-lived camera scanner reads current state, not a stale closure.
   const openMapRef = useRef(openMap);
@@ -221,21 +229,32 @@ export const ScanBook = () => {
       </h1>
 
       <div className="glass-card" style={{ marginBottom: '1.5rem' }}>
-        <label className="input-label">Scan tracking barcode</label>
-        <input
-          ref={inputRef}
-          className="input-field"
-          style={{ fontSize: '1.1rem', letterSpacing: '1px' }}
-          placeholder={loading ? 'Loading open orders…' : 'Scan or type tracking ID, press Enter'}
-          value={code}
-          autoFocus
-          disabled={loading}
-          onChange={(e) => setCode(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') onScan(code); }}
-        />
-        <button className="btn btn-outline" onClick={() => setShowCamera(true)} disabled={loading} style={{ marginTop: '0.75rem', width: '100%' }}>
-          <Camera size={18} /> Scan with camera
-        </button>
+        <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.85rem' }}>
+          <button className={`btn ${mode === 'type' ? 'btn-primary' : 'btn-outline'}`} onClick={() => changeMode('type')} style={{ flex: 1 }}>
+            <Keyboard size={16} /> Type
+          </button>
+          <button className={`btn ${mode === 'camera' ? 'btn-primary' : 'btn-outline'}`} onClick={() => changeMode('camera')} style={{ flex: 1 }}>
+            <Camera size={16} /> Camera
+          </button>
+        </div>
+
+        {mode === 'type' ? (
+          <input
+            ref={inputRef}
+            className="input-field"
+            style={{ fontSize: '1.1rem', letterSpacing: '1px' }}
+            placeholder={loading ? 'Loading open orders…' : 'Scan or type tracking ID, press Enter'}
+            value={code}
+            autoFocus
+            disabled={loading}
+            onChange={(e) => setCode(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') onScan(code); }}
+          />
+        ) : loading ? (
+          <div style={{ height: 280, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-color)', borderRadius: 'var(--radius-md)', color: 'var(--text-secondary)' }}>Loading open orders…</div>
+        ) : (
+          <CameraScanner onDetected={onScan} />
+        )}
         {flash && (
           <div style={{ marginTop: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 600,
             color: flash.kind === 'ok' ? 'var(--success-color)' : flash.kind === 'warn' ? 'var(--warning-color)' : 'var(--danger-color)' }}>
@@ -313,13 +332,6 @@ export const ScanBook = () => {
             </div>
           </div>
         </div>
-      )}
-
-      {showCamera && (
-        <CameraScanner
-          onDetected={onScan}
-          onClose={() => { setShowCamera(false); inputRef.current?.focus(); }}
-        />
       )}
     </div>
   );

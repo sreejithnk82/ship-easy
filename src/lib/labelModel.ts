@@ -22,7 +22,7 @@ export interface LabelFields {
   toName: string;
   toLines: string[];
   pincode: string;
-  productDesc: string;
+  productName: string;
 }
 
 export function buildLabelFields(o: LabelOrder, product: Product | undefined): LabelFields {
@@ -47,6 +47,6 @@ export function buildLabelFields(o: LabelOrder, product: Product | undefined): L
     toName: o.receiverName || '',
     toLines,
     pincode: String(o.receiverPincode || ''),
-    productDesc: p?.description || p?.content || p?.name || '',
+    productName: p?.name || p?.description || '',
   };
 }

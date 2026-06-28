@@ -11,7 +11,7 @@ function requireSuperadmin_(ctx) { return ctx.role === 'superadmin'; }
 /* ------------------------------ customers ------------------------------ */
 
 function action_listCustomers_(payload, ctx) {
-  if (!requireSuperadmin_(ctx)) return forbidden_();
+  if (!isAdmin_(ctx)) return forbidden_(); // admin reads directory; superadmin manages it
   var rows = readObjects_(getSheetOrThrow_(getDirectorySpreadsheet_(), SHEETS.CUSTOMERS)).rows;
   var customers = rows.map(function (r) {
     return {
@@ -40,6 +40,7 @@ function action_createCustomer_(payload, ctx) {
 
   var ss = SpreadsheetApp.create('ShipEasy — ' + c.name);
   seedCustomerSpreadsheet_(ss);
+  fileIntoDataFolder_(ss); // keep all ShipEasy sheets in one Drive folder (if configured)
 
   appendRowObjects_(custSheet, [{
     customer_id: c.customerId, name: c.name, spreadsheet_id: ss.getId(),
@@ -116,7 +117,7 @@ function action_addUser_(payload, ctx) {
 }
 
 function action_listUsers_(payload, ctx) {
-  if (!requireSuperadmin_(ctx)) return forbidden_();
+  if (!isAdmin_(ctx)) return forbidden_(); // admin reads users; superadmin adds them
   var rows = readObjects_(getSheetOrThrow_(getDirectorySpreadsheet_(), SHEETS.USERS)).rows;
   return {
     ok: true,
@@ -129,7 +130,7 @@ function action_listUsers_(payload, ctx) {
 /* --------------------------- tracking ranges --------------------------- */
 
 function action_addTrackingRange_(payload, ctx) {
-  if (!requireSuperadmin_(ctx)) return forbidden_();
+  if (!isAdmin_(ctx)) return forbidden_();
   var customerId = payload.customerId;
   var r = payload.range || {};
   if (!customerId) return badRequest_('customerId required');
@@ -173,7 +174,7 @@ function rangeOverlap_(rows, excludeSeq, prefix, start, end) {
  * only extend `end` upward or change status (active/paused). Lock-guarded.
  */
 function action_updateTrackingRange_(payload, ctx) {
-  if (!requireSuperadmin_(ctx)) return forbidden_();
+  if (!isAdmin_(ctx)) return forbidden_();
   var customerId = payload.customerId, seq = Number(payload.seq);
   var f = payload.range || {};
   if (!customerId || !seq) return badRequest_('customerId and seq required');
@@ -232,7 +233,7 @@ function action_updateTrackingRange_(payload, ctx) {
 
 /** Delete a range — only if untouched (no IDs issued). Lock-guarded. */
 function action_deleteTrackingRange_(payload, ctx) {
-  if (!requireSuperadmin_(ctx)) return forbidden_();
+  if (!isAdmin_(ctx)) return forbidden_();
   var customerId = payload.customerId, seq = Number(payload.seq);
   if (!customerId || !seq) return badRequest_('customerId and seq required');
 
@@ -254,7 +255,7 @@ function action_deleteTrackingRange_(payload, ctx) {
 
 /** Move an untouched range to another customer. Delete-source-first for crash safety. */
 function action_reassignTrackingRange_(payload, ctx) {
-  if (!requireSuperadmin_(ctx)) return forbidden_();
+  if (!isAdmin_(ctx)) return forbidden_();
   var fromId = payload.fromCustomerId, toId = payload.toCustomerId, seq = Number(payload.seq);
   if (!fromId || !toId || !seq) return badRequest_('fromCustomerId, toCustomerId, seq required');
   if (String(fromId) === String(toId)) return badRequest_('same customer');

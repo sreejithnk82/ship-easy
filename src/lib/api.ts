@@ -58,7 +58,7 @@ export interface Sender {
   senderAddr1: string; senderAddr2: string; senderCity: string;
   senderState: string; senderEmail: string; hubCustomerCode: string;
 }
-export interface Profile { email: string; role: string; customerId: string; customer?: Sender; }
+export interface Profile { email: string; role: string; customerId: string; customer?: Sender; maintenance?: string; }
 // A reusable "From" address. Products reference one by id; the server resolves
 // the sender block live, so editing an address updates every product using it.
 export interface SenderAddress {
@@ -81,6 +81,8 @@ export interface Product {
   description: string;
   declaredValue: number;
   weightG: number; lengthCm: number; widthCm: number; heightCm: number;
+  status?: string;        // 'verified' | 'pending' — only verified can be booked
+  createdBy?: string; verifiedBy?: string; verifiedAt?: string;
 }
 export interface OrderInput {
   clientOrderId: string; productId: string;
@@ -123,6 +125,8 @@ export const api = {
     callApi<{ changed: number }>('updateProduct', { productId, product, customerId }),
   deleteProduct: (productId: string, customerId?: string) =>
     callApi<{ ok: true }>('deleteProduct', { productId, customerId }),
+  verifyProduct: (productId: string, verified: boolean, customerId?: string) =>
+    callApi<{ status: string }>('verifyProduct', { productId, verified, customerId }),
   listSenderAddresses: (customerId?: string) =>
     callApi<{ addresses: SenderAddress[] }>('listSenderAddresses', { customerId }),
   addSenderAddress: (address: Partial<SenderAddress>, customerId?: string) =>

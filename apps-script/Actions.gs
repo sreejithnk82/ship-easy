@@ -16,7 +16,7 @@
 /* ------------------------------- profile ------------------------------- */
 
 function action_getProfile_(payload, ctx) {
-  var profile = { ok: true, email: ctx.email, role: ctx.role, customerId: ctx.customerId || '' };
+  var profile = { ok: true, email: ctx.email, role: ctx.role, customerId: ctx.customerId || '', maintenance: maintenanceMessage_() };
   if (ctx.customerId) {
     try {
       var rec = getCustomerRecord_(ctx.customerId);
@@ -67,6 +67,12 @@ function productFromRow_(r, addrById) {
     lengthCm: Number(r.length_cm) || 0,
     widthCm: Number(r.width_cm) || 0,
     heightCm: Number(r.height_cm) || 0,
+    // Approval workflow: blank/legacy rows count as verified; new member-added
+    // products start 'pending' until an admin/superadmin verifies them.
+    status: r.status ? String(r.status) : 'verified',
+    createdBy: r.created_by || '',
+    verifiedBy: r.verified_by || '',
+    verifiedAt: r.verified_at ? String(r.verified_at) : '',
   };
 }
 
@@ -86,8 +92,13 @@ var PRODUCT_COLMAP = {
 function productColumns_() {
   var cols = ['product_id'];
   Object.keys(PRODUCT_COLMAP).forEach(function (k) { cols.push(PRODUCT_COLMAP[k]); });
-  cols.push('created_at');
+  cols.push('created_at', 'status', 'created_by', 'verified_by', 'verified_at');
   return cols;
+}
+
+/** member / admin / superadmin may manage products (operators cannot). */
+function canManageProducts_(ctx) {
+  return ctx.role === 'member' || isAdmin_(ctx);
 }
 
 /** Auto-generate a short, unique-ish internal product code from the name. */
@@ -98,7 +109,7 @@ function generateProductCode_(sheet, name) {
 }
 
 function action_addProduct_(payload, ctx) {
-  if (!isSuperadmin_(ctx)) return forbidden_();
+  if (!canManageProducts_(ctx)) return forbidden_();
   var c = resolveCustomerId_(payload, ctx);
   if (c.error) return c.error;
   var p = payload.product || {};
@@ -108,19 +119,22 @@ function action_addProduct_(payload, ctx) {
   var ss = getCustomerSpreadsheet_(c.id);
   var sheet = ensureColumns_(getSheetOrThrow_(ss, SHEETS.PRODUCTS), productColumns_());
   var productId = Utilities.getUuid();
-  var row = { product_id: productId, created_at: nowIso_() };
+  var row = { product_id: productId, created_at: nowIso_(), created_by: ctx.email };
   Object.keys(PRODUCT_COLMAP).forEach(function (k) {
     if (p[k] !== undefined) row[PRODUCT_COLMAP[k]] = p[k];
   });
   if (!row.product_code) row.product_code = generateProductCode_(sheet, p.name); // auto, hidden from UI
   if (!row.description) row.description = p.name;
   if (!row.content) row.content = 'OTHERS';
+  // Managers auto-verify their own products; members create as pending.
+  if (isAdmin_(ctx)) { row.status = 'verified'; row.verified_by = ctx.email; row.verified_at = nowIso_(); }
+  else { row.status = 'pending'; }
   appendRowObjects_(sheet, [row]);
-  return { ok: true, productId: productId, productCode: row.product_code };
+  return { ok: true, productId: productId, productCode: row.product_code, status: row.status };
 }
 
 function action_updateProduct_(payload, ctx) {
-  if (!isSuperadmin_(ctx)) return forbidden_();
+  if (!canManageProducts_(ctx)) return forbidden_();
   var c = resolveCustomerId_(payload, ctx);
   if (c.error) return c.error;
   var productId = payload.productId;
@@ -131,6 +145,7 @@ function action_updateProduct_(payload, ctx) {
   var data = readObjects_(sheet);
   var row = data.rows.find(function (r) { return String(r.product_id) === String(productId); });
   if (!row) return { ok: false, error: 'NOT_FOUND' };
+  var setCell = function (name, val) { var col = data.headers.indexOf(name) + 1; if (col > 0) sheet.getRange(row._row, col).setValue(val); };
 
   var changed = 0;
   Object.keys(PRODUCT_COLMAP).forEach(function (k) {
@@ -140,13 +155,37 @@ function action_updateProduct_(payload, ctx) {
     sheet.getRange(row._row, col).setValue(p[k]);
     changed++;
   });
+  // A member edit needs re-verification; an admin/superadmin edit stays verified.
+  if (isAdmin_(ctx)) { setCell('status', 'verified'); setCell('verified_by', ctx.email); setCell('verified_at', nowIso_()); }
+  else { setCell('status', 'pending'); setCell('verified_by', ''); setCell('verified_at', ''); }
   SpreadsheetApp.flush();
   return { ok: true, changed: changed };
 }
 
+/** Admin/superadmin verifies a product (or sends it back to pending). */
+function action_verifyProduct_(payload, ctx) {
+  if (!isAdmin_(ctx)) return forbidden_();
+  var c = resolveCustomerId_(payload, ctx);
+  if (c.error) return c.error;
+  var productId = payload.productId;
+  if (!productId) return badRequest_('productId required');
+  var verified = payload.verified !== false; // default true
+
+  var sheet = ensureColumns_(getSheetOrThrow_(getCustomerSpreadsheet_(c.id), SHEETS.PRODUCTS), productColumns_());
+  var data = readObjects_(sheet);
+  var row = data.rows.find(function (r) { return String(r.product_id) === String(productId); });
+  if (!row) return { ok: false, error: 'NOT_FOUND' };
+  var setCell = function (name, val) { var col = data.headers.indexOf(name) + 1; if (col > 0) sheet.getRange(row._row, col).setValue(val); };
+
+  if (verified) { setCell('status', 'verified'); setCell('verified_by', ctx.email); setCell('verified_at', nowIso_()); }
+  else { setCell('status', 'pending'); setCell('verified_by', ''); setCell('verified_at', ''); }
+  SpreadsheetApp.flush();
+  return { ok: true, status: verified ? 'verified' : 'pending' };
+}
+
 /** Delete a product, but refuse if any order still references it. */
 function action_deleteProduct_(payload, ctx) {
-  if (!isSuperadmin_(ctx)) return forbidden_();
+  if (!isAdmin_(ctx)) return forbidden_();
   var c = resolveCustomerId_(payload, ctx);
   if (c.error) return c.error;
   var productId = payload.productId;
@@ -423,7 +462,9 @@ function customerToSender_(customerId, rec) {
 function resolveCustomerId_(payload, ctx) {
   var id = payload.customerId || ctx.customerId;
   if (!id) return { error: badRequest_('customerId required') };
-  if (ctx.role !== 'superadmin' && String(ctx.customerId) !== String(id)) {
+  // superadmin and admin are global — they act on any group. member/operator are
+  // locked to their own customer.
+  if (!isAdmin_(ctx) && String(ctx.customerId) !== String(id)) {
     return { error: forbidden_() };
   }
   return { id: id };

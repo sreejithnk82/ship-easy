@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { HashRouter, Routes, Route, Navigate, NavLink } from 'react-router-dom';
-import { Package, PackagePlus, ScanLine, LogOut, ShieldCheck, MapPin, History as HistoryIcon } from 'lucide-react';
+import { Package, PackagePlus, ScanLine, LogOut, ShieldCheck, MapPin, History as HistoryIcon, Wrench } from 'lucide-react';
 import { initAuth, onAuthChange, getEmail, signOut } from './lib/auth';
 import { api, Profile, Customer } from './lib/api';
 import { ApiError } from './lib/api';
-import { ProfileContext, isOperator, canScan } from './lib/profile';
+import { ProfileContext, isAdmin, isOperator, canScan } from './lib/profile';
 import { ActiveCustomerContext, ACTIVE_CUSTOMER_KEY } from './lib/activeCustomer';
 import { Login } from './pages/Login';
 import { AddOrder } from './pages/AddOrder';
@@ -47,7 +47,7 @@ const NavItems = ({ profile }: { profile: Profile | null }) => (
         <ScanLine size={20} /> Scan &amp; Book
       </NavLink>
     )}
-    {profile?.role === 'superadmin' && (
+    {isAdmin(profile) && (
       <NavLink to="/admin" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} style={{ color: 'var(--primary-color)' }}>
         <ShieldCheck size={20} /> Master Admin
       </NavLink>
@@ -64,13 +64,28 @@ const Layout = ({ profile, children, switcher }: { profile: Profile | null; chil
         <NavItems profile={profile} />
       </nav>
       <div style={{ marginTop: 'auto' }}>
+        {profile?.customer?.name && (
+          <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-primary)', padding: '0 1rem 0.1rem' }}>{profile.customer.name}</div>
+        )}
         <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', padding: '0 1rem 0.5rem' }}>{getEmail()}</div>
         <button className="nav-link" onClick={signOut} style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', color: 'var(--text-secondary)' }}>
           <LogOut size={20} /> Logout
         </button>
       </div>
     </aside>
-    <main className="main-content"><div className="slide-up">{switcher}{children}</div></main>
+    <main className="main-content"><div className="slide-up">
+      {profile?.maintenance && (
+        <div style={{ marginBottom: '1rem', padding: '0.7rem 1rem', display: 'flex', alignItems: 'center', gap: '0.6rem', background: 'rgba(245,158,11,0.12)', border: '1px solid var(--warning-color)', borderRadius: 'var(--radius-lg)', color: 'var(--warning-color)', fontWeight: 600, fontSize: '0.9rem' }}>
+          <Wrench size={18} style={{ flexShrink: 0 }} />
+          <span>
+            {profile.role === 'superadmin'
+              ? `Maintenance mode is ON — everyone else's changes are paused. (${profile.maintenance})`
+              : profile.maintenance}
+          </span>
+        </div>
+      )}
+      {switcher}{children}
+    </div></main>
     <nav className="bottom-nav">
       {!isOperator(profile) && (
         <NavLink to="/book" className={({ isActive }) => `bottom-nav-item ${isActive ? 'active' : ''}`}><PackagePlus size={22} /><span>Book</span></NavLink>
@@ -84,7 +99,7 @@ const Layout = ({ profile, children, switcher }: { profile: Profile | null; chil
       {canScan(profile) && (
         <NavLink to="/scan" className={({ isActive }) => `bottom-nav-item ${isActive ? 'active' : ''}`}><ScanLine size={22} /><span>Scan</span></NavLink>
       )}
-      {profile?.role === 'superadmin' && (
+      {isAdmin(profile) && (
         <NavLink to="/admin" className={({ isActive }) => `bottom-nav-item ${isActive ? 'active' : ''}`}><ShieldCheck size={22} /><span>Admin</span></NavLink>
       )}
     </nav>
@@ -121,9 +136,9 @@ const App = () => {
     return unsub;
   }, []);
 
-  // Superadmins act on a chosen customer — load the list for the switcher.
+  // Admins & superadmins act on a chosen group — load the list for the switcher.
   useEffect(() => {
-    if (profile?.role === 'superadmin') {
+    if (isAdmin(profile)) {
       api.listCustomers().then(({ customers }) => setCustomers(customers)).catch(() => { /* ignore */ });
     }
   }, [profile?.role]);
@@ -145,16 +160,16 @@ const App = () => {
   if (profileErr === 'NO_ACCOUNT' || (!profile && profileErr)) {
     return <ContactAdmin errorMsg={profileErr === 'NO_ACCOUNT' ? null : profileErr} />;
   }
-  if (!profile?.customerId && profile?.role !== 'superadmin') {
+  if (!profile?.customerId && !isAdmin(profile)) {
     return <ContactAdmin errorMsg={null} />;
   }
 
-  const showSwitcher = profile?.role === 'superadmin' && !profile.customerId;
+  const showSwitcher = isAdmin(profile) && !profile?.customerId;
   const switcher = showSwitcher ? (
     <div className="glass-card" style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.6rem 1rem', flexWrap: 'wrap' }}>
-      <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Acting as customer:</span>
+      <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Acting as group:</span>
       <select className="input-field" value={activeId} onChange={(e) => setActiveId(e.target.value)} style={{ maxWidth: 320, width: 'auto', flex: 1 }}>
-        <option value="">— select a customer —</option>
+        <option value="">— select a group —</option>
         {customers.map((c) => <option key={c.customerId} value={c.customerId}>{c.name} ({c.customerId})</option>)}
       </select>
     </div>

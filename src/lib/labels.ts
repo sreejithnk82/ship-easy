@@ -80,8 +80,8 @@ function drawLabel(doc: jsPDF, f: LabelFields, ox: number, oy: number, s: number
   setF('bold', 28); txt(f.pincode, 12, 348);
   hline(362);
 
-  // ── Product description ──
-  setF('normal', 12); wrap(f.productDesc, 12, 384, 264, 14);
+  // ── Product name ──
+  setF('normal', 12); wrap(f.productName, 12, 384, 264, 14);
 }
 
 /** Build a PDF laying labels out per the chosen paper size + per-page grid. */
