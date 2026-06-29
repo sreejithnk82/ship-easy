@@ -156,12 +156,12 @@ export const AddressSorter = ({ rawInitial, onApply, onClose }: {
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 3000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0.75rem' }}>
       <div className="glass-card slide-up modal-card" style={{ width: '100%', maxWidth: 640, background: 'white', maxHeight: '92vh', overflowY: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-          <h3 style={{ margin: 0 }}>Sort address</h3>
+          <h3 style={{ margin: 0 }}>Fill Address</h3>
           <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={22} /></button>
         </div>
 
         <div className="input-group" style={{ margin: '0 0 0.75rem' }}>
-          <label className="input-label">Paste message</label>
+          <label className="input-label">Enter address text</label>
           <textarea className="input-field" style={{ minHeight: 70 }} value={raw}
             onChange={(e) => { setRaw(e.target.value); rebuild(e.target.value); }} placeholder="Paste the order message…" />
         </div>

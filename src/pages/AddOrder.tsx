@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Wand2, Save, AlertCircle, Package, Printer, Trash2, Pencil, WifiOff, LayoutGrid } from 'lucide-react';
-import { parseRawAddress } from '../lib/parser';
+import { Save, AlertCircle, Package, Printer, Trash2, Pencil, WifiOff, LayoutGrid, X } from 'lucide-react';
 import { api, Product, OrderInput } from '../lib/api';
 import { ApiError } from '../lib/api';
 import { useProfile } from '../lib/profile';
@@ -83,20 +82,6 @@ export const AddOrder = () => {
   // rule — fill Line 2 with "..." so it passes and the operator can edit it.
   const withLine2Default = (form: typeof EMPTY) =>
     minChars(form.line1) && !form.line2.trim() ? { ...form, line2: '...' } : form;
-
-  const onParse = () => {
-    const r = parseRawAddress(raw);
-    setF((prev) => withLine2Default({
-      ...prev,
-      name: r.name || prev.name,
-      phone: r.phone || prev.phone,
-      pincode: r.pincode || prev.pincode,
-      state: r.state || stateFromPincode(r.pincode) || prev.state,
-      line1: r.line1 || prev.line1,
-      line2: r.line2 || prev.line2,
-    }));
-    setAttempted(true);
-  };
 
   const onPincode = (v: string) => {
     setF((prev) => ({ ...prev, pincode: v, state: stateFromPincode(v) || prev.state }));
@@ -218,8 +203,8 @@ export const AddOrder = () => {
   // Only verified products can be booked (members add products as "pending").
   const bookable = products.filter((p) => p.status !== 'pending');
 
-  // Field-level validity → drives the inline red highlights and the post-extract
-  // "captured / still needed" summary. Only surfaced once `attempted`.
+  // Field-level validity → drives the inline red highlights. Only surfaced once
+  // `attempted` (set by the sorter's onSorted or a failed addToStack).
   const errs = {
     name: minChars(f.name) ? '' : 'Min 3 characters',
     phone: isValidIndianMobile(f.phone) ? '' : 'Enter a valid Indian mobile number',
@@ -229,13 +214,8 @@ export const AddOrder = () => {
     line2: minChars(f.line2) ? '' : 'Min 3 characters',
   };
   const err = (k: keyof typeof errs) => (attempted ? errs[k] : '');
-  const SUMMARY: [keyof typeof errs, string][] = [
-    ['name', 'Name'], ['phone', 'Phone'], ['pincode', 'Pincode'],
-    ['line1', 'Address Line 1'], ['line2', 'Address Line 2'],
-  ];
-  const needed = SUMMARY.filter(([k]) => errs[k]).map(([, l]) => l);
-  const captured = SUMMARY.filter(([k]) => !errs[k]).map(([, l]) => l);
-  const nothingParsed = !f.name.trim() && !f.phone.trim() && !f.pincode.trim() && !f.line1.trim();
+
+  const closeForm = () => { setEditId(null); setF({ ...EMPTY }); setAttempted(false); setAdding(false); };
 
   if (!customerId) {
     return <div><h1 className="page-title">Book Orders</h1>
@@ -246,8 +226,8 @@ export const AddOrder = () => {
     <div style={{ paddingBottom: '5rem' }}>
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h1 className="page-title" style={{ margin: 0 }}>Book Orders</h1>
-        <button className="btn btn-primary" onClick={() => { if (adding) { setEditId(null); setF({ ...EMPTY }); } setAttempted(false); setAdding(!adding); }} style={{ width: 'auto' }}>
-          {adding ? 'Close' : '+ Add Order'}
+        <button className="btn btn-primary" onClick={() => (adding ? closeForm() : (setAttempted(false), setAdding(true)))} style={{ width: 'auto' }}>
+          + Add Order
         </button>
       </div>
 
@@ -270,53 +250,48 @@ export const AddOrder = () => {
       ) : null}
 
       {adding && (
-        <div className="glass-card slide-up" style={{ marginBottom: '1.5rem' }}>
-          <div className="input-group">
-            <label className="input-label">Paste raw message (optional)</label>
-            <textarea className="input-field" style={{ minHeight: '90px' }} placeholder="Paste WhatsApp text…" value={raw} onChange={(e) => setRaw(e.target.value)} />
-          </div>
-          <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
-            <button className="btn btn-outline" onClick={onParse} style={{ width: 'auto' }}><Wand2 size={16} /> Auto-extract</button>
-            <button className="btn btn-outline" onClick={() => setSorting(true)} style={{ width: 'auto' }}><LayoutGrid size={16} /> Sort manually</button>
-          </div>
+        <div style={{ position: 'fixed', inset: 0, zIndex: 2500, background: 'var(--bg-color)', overflowY: 'auto' }}>
+          <div className="slide-up" style={{ maxWidth: 720, margin: '0 auto', padding: '1.25rem 1.25rem 4rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+              <h2 style={{ margin: 0 }}>{editId ? 'Edit Order' : 'Add Order'}</h2>
+              <button onClick={closeForm} title="Close" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', padding: '0.25rem' }}><X size={26} /></button>
+            </div>
 
-          {attempted && (
-            nothingParsed ? (
-              <div style={{ marginBottom: '1rem', padding: '0.6rem 0.9rem', display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'rgba(239,68,68,0.1)', border: '1px solid var(--danger-color)', borderRadius: 'var(--radius-md)', color: 'var(--danger-color)', fontSize: '0.85rem', fontWeight: 600 }}>
-                <AlertCircle size={16} style={{ flexShrink: 0 }} /> Couldn't read this message — please fill the form manually.
+            <div className="input-group">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <label className="input-label" style={{ margin: 0 }}>Enter address text</label>
+                {raw && <button onClick={() => setRaw('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', fontSize: '0.78rem', display: 'inline-flex', alignItems: 'center', gap: '0.2rem', padding: '0.2rem' }}><X size={14} /> Clear</button>}
               </div>
-            ) : (
-              <div style={{ marginBottom: '1rem', padding: '0.6rem 0.9rem', background: 'var(--bg-color)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', fontSize: '0.82rem', lineHeight: 1.6 }}>
-                {captured.length > 0 && <div style={{ color: 'var(--success-color)', fontWeight: 600 }}>Captured: {captured.join(', ')}</div>}
-                {needed.length > 0
-                  ? <div style={{ color: 'var(--warning-color)', fontWeight: 600 }}>Still needed: {needed.join(', ')}</div>
-                  : <div style={{ color: 'var(--success-color)', fontWeight: 600 }}>All set — review and Add.</div>}
-              </div>
-            )
-          )}
+              <textarea className="input-field" style={{ minHeight: '90px' }} placeholder="Paste or type the address…" value={raw} onChange={(e) => setRaw(e.target.value)} />
+            </div>
+            <button className="btn btn-outline" onClick={() => setSorting(true)} style={{ width: 'auto', marginBottom: '1rem' }}><LayoutGrid size={16} /> Fill Address</button>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '1rem' }}>
-            <In label="Name *" v={f.name} on={(v) => setF({ ...f, name: v })} error={err('name')} />
-            <In label="Phone *" v={f.phone} on={(v) => setF({ ...f, phone: v })} error={err('phone')} />
-            <In label="Pincode *" v={f.pincode} on={onPincode} error={err('pincode')} />
-            <In label="State (auto)" v={f.state} on={(v) => setF({ ...f, state: v })} />
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '1rem' }}>
+              <In label="Name *" v={f.name} on={(v) => setF({ ...f, name: v })} error={err('name')} />
+              <In label="Phone *" v={f.phone} on={(v) => setF({ ...f, phone: v })} error={err('phone')} />
+              <In label="Pincode *" v={f.pincode} on={onPincode} error={err('pincode')} />
+              <In label="State (auto)" v={f.state} on={(v) => setF({ ...f, state: v })} />
+            </div>
+            <In label="Address Line 1 *" v={f.line1} on={(v) => setF({ ...f, line1: v })} error={err('line1')} />
+            <In label="Address Line 2 *" v={f.line2} on={(v) => setF({ ...f, line2: v })} error={err('line2')} />
+
+            <div className="input-group">
+              <label className="input-label">Product *</label>
+              <select className="input-field" value={f.productId} onChange={(e) => setF({ ...f, productId: e.target.value })}
+                style={attempted && !f.productId ? { borderColor: 'var(--danger-color)' } : undefined}>
+                <option value="">-- Choose --</option>
+                {bookable.map((p) => <option key={p.productId} value={p.productId}>{p.name} ({p.weightG}g)</option>)}
+              </select>
+              {attempted && !f.productId && <div style={{ color: 'var(--danger-color)', fontSize: '0.75rem', marginTop: '0.25rem' }}>Select a product</div>}
+            </div>
+
+            <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.25rem' }}>
+              <button className="btn btn-outline" onClick={closeForm} style={{ flex: '0 0 auto' }}>Cancel</button>
+              <button className="btn btn-primary" onClick={addToStack} style={{ flex: 1 }}>
+                <Save size={18} /> {editId ? 'Update Order' : 'Add Order'}
+              </button>
+            </div>
           </div>
-          <In label="Address Line 1 *" v={f.line1} on={(v) => setF({ ...f, line1: v })} error={err('line1')} />
-          <In label="Address Line 2 *" v={f.line2} on={(v) => setF({ ...f, line2: v })} error={err('line2')} />
-
-          <div className="input-group">
-            <label className="input-label">Product *</label>
-            <select className="input-field" value={f.productId} onChange={(e) => setF({ ...f, productId: e.target.value })}
-              style={attempted && !f.productId ? { borderColor: 'var(--danger-color)' } : undefined}>
-              <option value="">-- Choose --</option>
-              {bookable.map((p) => <option key={p.productId} value={p.productId}>{p.name} ({p.weightG}g)</option>)}
-            </select>
-            {attempted && !f.productId && <div style={{ color: 'var(--danger-color)', fontSize: '0.75rem', marginTop: '0.25rem' }}>Select a product</div>}
-          </div>
-
-          <button className="btn btn-primary" onClick={addToStack} style={{ width: '100%' }}>
-            <Save size={18} /> {editId ? 'Update Order' : 'Add Order'}
-          </button>
         </div>
       )}
 
