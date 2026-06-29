@@ -140,3 +140,36 @@ export function parseRawAddress(rawText: string): ParsedAddress {
     line2,
   };
 }
+
+/* ------------------------------------------------------------------------- *
+ * Single-line classifier — used by the drag-and-drop sorter to pre-place a
+ * pasted line into a field zone and to strip any label prefix from the chip.
+ * ------------------------------------------------------------------------- */
+
+export type ChipZone = 'name' | 'phone' | 'pincode' | 'line1' | 'line2' | 'state' | '';
+
+const LABEL_ZONE: Record<string, ChipZone> = {
+  name: 'name', address: 'line1', district: 'line2', state: 'state', pin: 'pincode', phone: 'phone',
+};
+
+/**
+ * Classify one pasted line for the sorter. Returns the chip `text` (label prefix
+ * removed) and the `zone` it should pre-fill ('' = leave in the unassigned pool).
+ * Labels win; otherwise an obvious phone/pincode is detected. For phone/pincode
+ * the text is normalized to just the extracted number.
+ */
+export function classifyLine(line: string): { text: string; zone: ChipZone } {
+  const m = line.match(LABEL_RE);
+  if (m) {
+    const zone = LABEL_ZONE[labelKey(m[1])] || '';
+    const value = m[2].trim();
+    if (zone === 'phone') return { text: findMobile(value) || value, zone };
+    if (zone === 'pincode') return { text: findPincode(value) || value, zone };
+    return { text: value, zone };
+  }
+  const ph = findMobile(line);
+  if (ph) return { text: ph, zone: 'phone' };
+  const pin = findPincode(line);
+  if (pin) return { text: pin, zone: 'pincode' };
+  return { text: line.trim(), zone: '' };
+}

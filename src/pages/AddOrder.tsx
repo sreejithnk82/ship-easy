@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Wand2, Save, AlertCircle, Package, Printer, Trash2, Pencil, WifiOff } from 'lucide-react';
+import { Wand2, Save, AlertCircle, Package, Printer, Trash2, Pencil, WifiOff, LayoutGrid } from 'lucide-react';
 import { parseRawAddress } from '../lib/parser';
 import { api, Product, OrderInput } from '../lib/api';
 import { ApiError } from '../lib/api';
@@ -16,6 +16,7 @@ import { downloadLabels } from '../lib/labels';
 import { getLabelFormat, setLabelFormat, LabelFormat } from '../lib/labelFormat';
 import { LabelFormatPicker } from '../components/LabelFormatPicker';
 import { LabelTile } from '../components/LabelTile';
+import { AddressSorter, SortedFields } from '../components/AddressSorter';
 import { useToast, useConfirm } from '../components/feedback';
 
 const EMPTY = { name: '', phone: '', pincode: '', line1: '', line2: '', state: '', productId: '' };
@@ -38,6 +39,7 @@ export const AddOrder = () => {
   // "captured / still needed" summary and the red field highlights, so a fresh
   // empty form isn't shown all-red.
   const [attempted, setAttempted] = useState(false);
+  const [sorting, setSorting] = useState(false); // drag-and-drop sorter modal open
   const [generating, setGenerating] = useState(false);
   const [loadingProducts, setLoadingProducts] = useState(true);
   const [loadingBalance, setLoadingBalance] = useState(true);
@@ -98,6 +100,21 @@ export const AddOrder = () => {
 
   const onPincode = (v: string) => {
     setF((prev) => ({ ...prev, pincode: v, state: stateFromPincode(v) || prev.state }));
+  };
+
+  // The drag-and-drop sorter fills the form, then the operator reviews and Adds.
+  const onSorted = (s: SortedFields) => {
+    setF((prev) => withLine2Default({
+      ...prev,
+      name: s.name || prev.name,
+      phone: s.phone || prev.phone,
+      pincode: s.pincode || prev.pincode,
+      state: stateFromPincode(s.pincode) || prev.state,
+      line1: s.line1 || prev.line1,
+      line2: s.line2 || prev.line2,
+    }));
+    setAttempted(true);
+    setSorting(false);
   };
 
   const addToStack = async () => {
@@ -258,7 +275,10 @@ export const AddOrder = () => {
             <label className="input-label">Paste raw message (optional)</label>
             <textarea className="input-field" style={{ minHeight: '90px' }} placeholder="Paste WhatsApp text…" value={raw} onChange={(e) => setRaw(e.target.value)} />
           </div>
-          <button className="btn btn-outline" onClick={onParse} style={{ marginBottom: '1rem' }}><Wand2 size={16} /> Auto-extract</button>
+          <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
+            <button className="btn btn-outline" onClick={onParse} style={{ width: 'auto' }}><Wand2 size={16} /> Auto-extract</button>
+            <button className="btn btn-outline" onClick={() => setSorting(true)} style={{ width: 'auto' }}><LayoutGrid size={16} /> Sort manually</button>
+          </div>
 
           {attempted && (
             nothingParsed ? (
@@ -377,6 +397,8 @@ export const AddOrder = () => {
           </div>
         );
       })()}
+
+      {sorting && <AddressSorter rawInitial={raw} onApply={onSorted} onClose={() => setSorting(false)} />}
     </div>
   );
 };
