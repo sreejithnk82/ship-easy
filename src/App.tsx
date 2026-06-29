@@ -16,7 +16,6 @@ import { SuperAdmin } from './pages/SuperAdmin';
 import { ContactAdmin } from './pages/ContactAdmin';
 import { ReloadPrompt } from './ReloadPrompt';
 import { RefreshControl } from './components/RefreshControl';
-import { refreshServiceablePincodes } from './lib/serviceable';
 
 const Brand = () => (
   <div className="sidebar-logo"><Package size={26} /> ShipEasy</div>
@@ -121,10 +120,26 @@ const Splash = ({ text }: { text: string }) => (
   </div>
 );
 
+// Profile is cached per-email so the app can render instantly on return visits
+// while it revalidates in the background (Apps Script cold-start is slow). The
+// server re-derives role/customer from the token on every call, so a briefly
+// stale cached role only affects which UI shows, never actual access.
+const profileKey = (email: string) => `shipeasy.profile.${email.toLowerCase()}`;
+function readCachedProfile(email: string | null): Profile | null {
+  if (!email) return null;
+  try { const raw = localStorage.getItem(profileKey(email)); return raw ? (JSON.parse(raw) as Profile) : null; } catch { return null; }
+}
+function writeCachedProfile(email: string, p: Profile) {
+  try { localStorage.setItem(profileKey(email), JSON.stringify(p)); } catch { /* ignore */ }
+}
+function clearCachedProfile(email: string) {
+  try { localStorage.removeItem(profileKey(email)); } catch { /* ignore */ }
+}
+
 const App = () => {
   const [ready, setReady] = useState(false);
   const [email, setEmail] = useState<string | null>(getEmail());
-  const [profile, setProfile] = useState<Profile | null>(null);
+  const [profile, setProfile] = useState<Profile | null>(() => readCachedProfile(getEmail()));
   const [profileErr, setProfileErr] = useState<string | null>(null);
   const [loadingProfile, setLoadingProfile] = useState(false);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -142,12 +157,6 @@ const App = () => {
     return unsub;
   }, []);
 
-  // Keep the serviceable-pincode cache warm once signed in (booking validation
-  // reads it locally). Best-effort — the Refresh button forces it on demand.
-  useEffect(() => {
-    if (profile) refreshServiceablePincodes().catch(() => { /* ignore */ });
-  }, [profile?.email]);
-
   // Admins & superadmins act on a chosen group — load the list for the switcher.
   useEffect(() => {
     if (isAdmin(profile)) {
@@ -158,10 +167,21 @@ const App = () => {
   useEffect(() => {
     if (!email) { setProfile(null); setProfileErr(null); return; }
     let active = true;
-    setLoadingProfile(true);
+    // Show the cached profile instantly; only block with the splash when we have
+    // nothing to show yet (true first login on this device).
+    const cached = readCachedProfile(email);
+    if (cached) { setProfile(cached); setProfileErr(null); }
+    setLoadingProfile(!cached);
     api.getProfile()
-      .then((p) => { if (active) { setProfile(p); setProfileErr(null); } })
-      .catch((e) => { if (active) { setProfile(null); setProfileErr(e instanceof ApiError ? e.code : (e as Error).message); } })
+      .then((p) => { if (!active) return; setProfile(p); setProfileErr(null); writeCachedProfile(email, p); })
+      .catch((e) => {
+        if (!active) return;
+        const code = e instanceof ApiError ? e.code : (e as Error).message;
+        const authLoss = code === 'NO_ACCOUNT' || code === 'DISABLED' || code === 'UNAUTHENTICATED';
+        if (authLoss) { clearCachedProfile(email); setProfile(null); setProfileErr(code); }
+        else if (!readCachedProfile(email)) { setProfile(null); setProfileErr(code); } // transient + nothing cached
+        // else: transient error but we have a cached profile → keep showing it
+      })
       .finally(() => { if (active) setLoadingProfile(false); });
     return () => { active = false; };
   }, [email]);

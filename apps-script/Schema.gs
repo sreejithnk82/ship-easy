@@ -49,6 +49,14 @@ function getDirectorySpreadsheet_() {
   return SpreadsheetApp.openById(id);
 }
 
+/** Parse a stored id list (JSON array, or comma-separated) into a string[]. */
+function parseIdList_(v) {
+  if (v == null || v === '') return [];
+  var s = String(v).trim();
+  if (s.charAt(0) === '[') { try { var a = JSON.parse(s); return Array.isArray(a) ? a.map(String) : []; } catch (e) { /* fall through */ } }
+  return s.split(',').map(function (x) { return x.trim(); }).filter(function (x) { return x; });
+}
+
 function getSheetOrThrow_(ss, name) {
   var sh = ss.getSheetByName(name);
   if (!sh) throw new Error('Missing sheet "' + name + '" in spreadsheet ' + ss.getId());

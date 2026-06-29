@@ -53,3 +53,13 @@ export async function refreshServiceablePincodes(): Promise<number> {
   try { localStorage.setItem(KEY, JSON.stringify({ pincodes: clean, at: Date.now() })); } catch { /* ignore */ }
   return clean.length;
 }
+
+// Refresh only if the cache is empty or older than this — keeps the list off the
+// hot path. The manual Refresh button always forces a full refresh.
+const TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
+
+/** Fetch only when stale; otherwise a no-op (no network). Never throws. */
+export async function refreshServiceableIfStale(): Promise<void> {
+  if (serviceableCount() > 0 && Date.now() - serviceableUpdatedAt() < TTL_MS) return;
+  try { await refreshServiceablePincodes(); } catch { /* ignore — fail open */ }
+}

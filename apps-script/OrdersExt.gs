@@ -136,6 +136,7 @@ function action_listOrders_(payload, ctx) {
       batchId: String(r.batch_id || ''),
       trackingId: String(r.tracking_id || ''),
       productId: String(r.product_id || ''),
+      extraProductIds: parseIdList_(r.extra_product_ids),
       receiverName: r.receiver_name || '',
       receiverPhone: String(r.receiver_phone || ''),
       receiverPincode: String(r.receiver_pincode || ''),

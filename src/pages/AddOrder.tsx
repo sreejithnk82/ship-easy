@@ -1,12 +1,12 @@
 import { useState, useEffect } from 'react';
-import { Save, AlertCircle, Package, Printer, Trash2, Pencil, WifiOff, LayoutGrid, X } from 'lucide-react';
+import { Save, AlertCircle, Package, Printer, Trash2, Pencil, WifiOff, LayoutGrid, X, ListOrdered } from 'lucide-react';
 import { api, Product, OrderInput } from '../lib/api';
 import { ApiError } from '../lib/api';
 import { useProfile } from '../lib/profile';
 import { useActiveCustomer } from '../lib/activeCustomer';
 import { stateFromPincode, isValidPincode } from '../lib/pincode';
 import { validateContact, minChars, isValidIndianMobile } from '../lib/validate';
-import { isServiceable } from '../lib/serviceable';
+import { isServiceable, refreshServiceableIfStale } from '../lib/serviceable';
 import {
   addPending, listPending, deletePending, clearPending,
   newClientOrderId, PendingOrder, saveBatch,
@@ -18,7 +18,8 @@ import { LabelTile } from '../components/LabelTile';
 import { AddressSorter, SortedFields } from '../components/AddressSorter';
 import { useToast, useConfirm } from '../components/feedback';
 
-const EMPTY = { name: '', phone: '', pincode: '', line1: '', line2: '', state: '', productId: '' };
+const EMPTY = { name: '', phone: '', pincode: '', line1: '', line2: '', state: '', productId: '', extraProductIds: [] as string[] };
+const MAX_EXTRA = 4; // up to 5 products per parcel (1 primary + 4 extra)
 
 export const AddOrder = () => {
   const profile = useProfile();
@@ -39,6 +40,7 @@ export const AddOrder = () => {
   // empty form isn't shown all-red.
   const [attempted, setAttempted] = useState(false);
   const [sorting, setSorting] = useState(false); // drag-and-drop sorter modal open
+  const [showCounts, setShowCounts] = useState(false); // product-count popup
   const [generating, setGenerating] = useState(false);
   const [loadingProducts, setLoadingProducts] = useState(true);
   const [loadingBalance, setLoadingBalance] = useState(true);
@@ -47,7 +49,7 @@ export const AddOrder = () => {
 
   const changeFmt = (f: LabelFormat) => { setFmt(f); setLabelFormat(f); };
 
-  useEffect(() => { if (customerId) { loadProducts(); refresh(); refreshBalance(); } }, [customerId]);
+  useEffect(() => { if (customerId) { loadProducts(); refresh(); refreshBalance(); refreshServiceableIfStale(); } }, [customerId]);
 
   const loadProducts = async () => {
     setLoadingProducts(true);
@@ -71,6 +73,11 @@ export const AddOrder = () => {
     }
   };
 
+  // Remember the last product booked for this customer so it's offered first /
+  // pre-selected next time — most orders in a session share one product.
+  const lastProductKey = `shipeasy.lastProduct.${customerId}`;
+  const getLastProduct = () => { try { return localStorage.getItem(lastProductKey) || ''; } catch { return ''; } };
+
   const keyName = `shipeasy.batchKey.${customerId}`;
   const getBatchKey = () => {
     let k = localStorage.getItem(keyName);
@@ -86,6 +93,14 @@ export const AddOrder = () => {
   const onPincode = (v: string) => {
     setF((prev) => ({ ...prev, pincode: v, state: stateFromPincode(v) || prev.state }));
   };
+
+  // Extra products (same parcel). Setting an existing slot to '' removes it.
+  const setExtra = (i: number, val: string) => setF((prev) => {
+    const ex = [...(prev.extraProductIds || [])];
+    if (val) ex[i] = val; else ex.splice(i, 1);
+    return { ...prev, extraProductIds: ex };
+  });
+  const addExtra = (val: string) => { if (val) setF((prev) => ({ ...prev, extraProductIds: [...(prev.extraProductIds || []), val] })); };
 
   // The drag-and-drop sorter fills the form, then the operator reviews and Adds.
   const onSorted = (s: SortedFields) => {
@@ -116,6 +131,7 @@ export const AddOrder = () => {
       clientOrderId: editId || newClientOrderId(),
       customerId,
       productId: ff.productId,
+      extraProductIds: (ff.extraProductIds || []).filter(Boolean),
       receiverName: ff.name.trim(),
       receiverPhone: ff.phone.trim(),
       receiverPincode: ff.pincode.replace(/\D/g, ''),
@@ -125,16 +141,19 @@ export const AddOrder = () => {
       createdAt: existing?.createdAt ?? Date.now(),
     };
     await addPending(order); // put() upserts by clientOrderId
+    try { localStorage.setItem(lastProductKey, ff.productId); } catch { /* ignore */ }
     setRaw(''); setF({ ...EMPTY }); setAdding(false); setEditId(null); setAttempted(false);
     refresh();
   };
 
   const startEdit = (o: PendingOrder) => {
+    setRaw('');
     setEditId(o.clientOrderId);
     setAttempted(false);
     setF({
       name: o.receiverName, phone: o.receiverPhone, pincode: o.receiverPincode,
       line1: o.receiverLine1, line2: o.receiverLine2, state: o.receiverState, productId: o.productId,
+      extraProductIds: o.extraProductIds || [],
     });
     setAdding(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -148,6 +167,30 @@ export const AddOrder = () => {
 
   const generate = async () => {
     if (pending.length === 0) { notify('Add some orders first.', 'error'); return; }
+
+    // Warn (don't block) on likely duplicates: same pincode AND matching name or phone.
+    const dupGroups = findDuplicateGroups(pending);
+    if (dupGroups.length) {
+      const ok = await confirm({
+        title: 'Possible duplicates',
+        message: (
+          <div style={{ fontSize: '0.9rem' }}>
+            <p style={{ marginTop: 0 }}>These look like duplicate orders (same pincode, with a matching name or phone):</p>
+            <ul style={{ margin: '0 0 0.6rem', paddingLeft: '1.1rem' }}>
+              {dupGroups.map((g, i) => (
+                <li key={i} style={{ marginBottom: '0.3rem' }}>
+                  {g.map((o) => o.receiverName).join(', ')} — PIN {g[0].receiverPincode} ({g.length} orders)
+                </li>
+              ))}
+            </ul>
+            <strong>Generate labels anyway?</strong>
+          </div>
+        ),
+        confirmLabel: 'Generate anyway', danger: true,
+      });
+      if (!ok) return;
+    }
+
     // Block before hitting the server when we already know there aren't enough IDs.
     if (balance && balance.remaining < pending.length) {
       notify(`Not enough tracking IDs: ${balance.remaining} left but ${pending.length} needed. Ask your admin to top up before generating.`, 'error');
@@ -156,7 +199,7 @@ export const AddOrder = () => {
     setGenerating(true);
     const key = getBatchKey();
     const orders: OrderInput[] = pending.map((p) => ({
-      clientOrderId: p.clientOrderId, productId: p.productId,
+      clientOrderId: p.clientOrderId, productId: p.productId, extraProductIds: p.extraProductIds || [],
       receiverName: p.receiverName, receiverPhone: p.receiverPhone,
       receiverPincode: p.receiverPincode, receiverLine1: p.receiverLine1,
       receiverLine2: p.receiverLine2, receiverState: p.receiverState,
@@ -202,6 +245,17 @@ export const AddOrder = () => {
   const productById = new Map(products.map((p) => [p.productId, p]));
   // Only verified products can be booked (members add products as "pending").
   const bookable = products.filter((p) => p.status !== 'pending');
+  // Float the last-used product to the top of the dropdown.
+  const lastProductId = getLastProduct();
+  const bookableSorted = lastProductId
+    ? [...bookable].sort((a, b) => (b.productId === lastProductId ? 1 : 0) - (a.productId === lastProductId ? 1 : 0))
+    : bookable;
+
+  // Open the Add form fresh. The last product is floated to the top of the
+  // dropdown but NOT pre-selected — the operator still picks deliberately.
+  const openAdd = () => {
+    setRaw(''); setEditId(null); setAttempted(false); setF({ ...EMPTY }); setAdding(true);
+  };
 
   // Field-level validity → drives the inline red highlights. Only surfaced once
   // `attempted` (set by the sorter's onSorted or a failed addToStack).
@@ -215,7 +269,7 @@ export const AddOrder = () => {
   };
   const err = (k: keyof typeof errs) => (attempted ? errs[k] : '');
 
-  const closeForm = () => { setEditId(null); setF({ ...EMPTY }); setAttempted(false); setAdding(false); };
+  const closeForm = () => { setRaw(''); setEditId(null); setF({ ...EMPTY }); setAttempted(false); setAdding(false); };
 
   if (!customerId) {
     return <div><h1 className="page-title">Book Orders</h1>
@@ -226,7 +280,7 @@ export const AddOrder = () => {
     <div style={{ paddingBottom: '5rem' }}>
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h1 className="page-title" style={{ margin: 0 }}>Book Orders</h1>
-        <button className="btn btn-primary" onClick={() => (adding ? closeForm() : (setAttempted(false), setAdding(true)))} style={{ width: 'auto' }}>
+        <button className="btn btn-primary" onClick={() => (adding ? closeForm() : openAdd())} style={{ width: 'auto' }}>
           + Add Order
         </button>
       </div>
@@ -280,10 +334,29 @@ export const AddOrder = () => {
               <select className="input-field" value={f.productId} onChange={(e) => setF({ ...f, productId: e.target.value })}
                 style={attempted && !f.productId ? { borderColor: 'var(--danger-color)' } : undefined}>
                 <option value="">-- Choose --</option>
-                {bookable.map((p) => <option key={p.productId} value={p.productId}>{p.name} ({p.weightG}g)</option>)}
+                {bookableSorted.map((p) => <option key={p.productId} value={p.productId}>{p.name} ({p.weightG}g)</option>)}
               </select>
               {attempted && !f.productId && <div style={{ color: 'var(--danger-color)', fontSize: '0.75rem', marginTop: '0.25rem' }}>Select a product</div>}
             </div>
+
+            {/* Additional products in the SAME parcel (one label). Weight is summed; box = largest item. */}
+            {f.productId && (
+              <div className="input-group">
+                <label className="input-label">Additional products (optional — same parcel)</label>
+                {(f.extraProductIds || []).map((id, i) => (
+                  <select key={i} className="input-field" style={{ marginBottom: '0.5rem' }} value={id} onChange={(e) => setExtra(i, e.target.value)}>
+                    <option value="">— remove —</option>
+                    {bookableSorted.map((p) => <option key={p.productId} value={p.productId}>{p.name} ({p.weightG}g)</option>)}
+                  </select>
+                ))}
+                {(f.extraProductIds || []).length < MAX_EXTRA && (
+                  <select className="input-field" value="" onChange={(e) => addExtra(e.target.value)}>
+                    <option value="">+ Add another product…</option>
+                    {bookableSorted.map((p) => <option key={p.productId} value={p.productId}>{p.name} ({p.weightG}g)</option>)}
+                  </select>
+                )}
+              </div>
+            )}
 
             <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.25rem' }}>
               <button className="btn btn-outline" onClick={closeForm} style={{ flex: '0 0 auto' }}>Cancel</button>
@@ -298,6 +371,11 @@ export const AddOrder = () => {
       <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-secondary)', margin: '0 0 1rem' }}>
         Active Orders ({pending.length})
         <span title="Saved locally; syncs on Generate Labels" style={{ display: 'inline-flex' }}><WifiOff size={14} /></span>
+        {pending.length > 0 && (
+          <button className="btn btn-outline" onClick={() => setShowCounts(true)} style={{ width: 'auto', marginLeft: 'auto', padding: '0.3rem 0.7rem', fontSize: '0.8rem' }}>
+            <ListOrdered size={15} /> Product counts
+          </button>
+        )}
       </h3>
 
       {pending.length === 0 ? (
@@ -321,6 +399,7 @@ export const AddOrder = () => {
               <div style={{ marginTop: '0.5rem' }}>
                 <span className="badge badge-primary" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
                   <Package size={13} /> {productById.get(o.productId)?.name || 'Unknown product'}
+                  {o.extraProductIds && o.extraProductIds.length > 0 && ` +${o.extraProductIds.length} more`}
                 </span>
               </div>
             </div>
@@ -374,9 +453,65 @@ export const AddOrder = () => {
       })()}
 
       {sorting && <AddressSorter rawInitial={raw} onApply={onSorted} onClose={() => setSorting(false)} />}
+
+      {showCounts && (() => {
+        const counts = new Map<string, number>();
+        let totalItems = 0;
+        pending.forEach((o) => [o.productId, ...(o.extraProductIds || [])].filter(Boolean).forEach((id) => {
+          counts.set(id, (counts.get(id) || 0) + 1); totalItems++;
+        }));
+        const rows = [...counts.entries()]
+          .map(([id, n]) => ({ name: productById.get(id)?.name || 'Unknown product', n }))
+          .sort((a, b) => b.n - a.n);
+        return (
+          <div onClick={() => setShowCounts(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 3000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1.25rem' }}>
+            <div onClick={(e) => e.stopPropagation()} className="glass-card slide-up modal-card" style={{ width: '100%', maxWidth: 420, background: 'white', maxHeight: '85vh', overflowY: 'auto' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}><ListOrdered size={20} /> Product counts</h3>
+                <button onClick={() => setShowCounts(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={22} /></button>
+              </div>
+              {rows.map((r) => (
+                <div key={r.name} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.55rem 0', borderBottom: '1px solid var(--border-color)' }}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}><Package size={15} style={{ color: 'var(--primary-color)' }} /> {r.name}</span>
+                  <strong>{r.n}</strong>
+                </div>
+              ))}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.7rem 0 0', fontWeight: 700 }}>
+                <span>Total products</span><span>{totalItems}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.25rem 0 0', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                <span>Parcels / labels</span><span>{pending.length}</span>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };
+
+// Group orders that look like duplicates: same pincode AND (same phone OR same
+// name). Union-find so A↔B↔C collapse into one cluster. Returns only groups >1.
+type DupOrder = { receiverName: string; receiverPhone: string; receiverPincode: string };
+function findDuplicateGroups<T extends DupOrder>(orders: T[]): T[][] {
+  const pin = (o: T) => String(o.receiverPincode || '').replace(/\D/g, '');
+  const phone = (o: T) => String(o.receiverPhone || '').replace(/\D/g, '').slice(-10);
+  const name = (o: T) => String(o.receiverName || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  const parent = orders.map((_, i) => i);
+  const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+  for (let i = 0; i < orders.length; i++) {
+    for (let j = i + 1; j < orders.length; j++) {
+      const samePin = pin(orders[i]) && pin(orders[i]) === pin(orders[j]);
+      if (!samePin) continue;
+      const samePhone = phone(orders[i]) && phone(orders[i]) === phone(orders[j]);
+      const sameName = name(orders[i]) && name(orders[i]) === name(orders[j]);
+      if (samePhone || sameName) parent[find(i)] = find(j);
+    }
+  }
+  const groups = new Map<number, T[]>();
+  orders.forEach((o, i) => { const r = find(i); (groups.get(r) || groups.set(r, []).get(r)!).push(o); });
+  return [...groups.values()].filter((g) => g.length > 1);
+}
 
 const In = ({ label, v, on, error }: { label: string; v: string; on: (v: string) => void; error?: string }) => (
   <div className="input-group" style={{ margin: '0 0 0.75rem' }}>

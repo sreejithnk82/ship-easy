@@ -33,6 +33,7 @@ const CONST = {
 export interface DtdcOrder {
   trackingId: string;
   productId: string;
+  extraProductIds?: string[]; // additional products in the same parcel
   receiverName: string;
   receiverPhone: string;
   receiverPincode: string;
@@ -41,10 +42,25 @@ export interface DtdcOrder {
   receiverState?: string;
 }
 
-/** One DTDC row (array in DTDC_HEADERS order). Sender/hub/content come from the product. */
-export function buildDtdcRow(order: DtdcOrder, product: Product | undefined): (string | number)[] {
-  const p = product;
-  const desc = p?.description || p?.name || '';
+/**
+ * One DTDC row (array in DTDC_HEADERS order). A parcel can carry several products
+ * (one label): weight + declared value are SUMMED across them, the package
+ * dimensions are the LARGEST product's box (by volume), and the description lists
+ * all items. Sender / hub / content come from the primary (first) product.
+ */
+export function buildDtdcRow(order: DtdcOrder, byId: Map<string, Product>): (string | number)[] {
+  const ids = [order.productId, ...(order.extraProductIds || [])].filter(Boolean);
+  const items = ids.map((id) => byId.get(id)).filter(Boolean) as Product[];
+  const p = items[0]; // primary → sender, hub, content
+
+  // Sum weight + value across all items.
+  const weightKg = items.reduce((s, it) => s + (Number(it.weightG) || 0), 0) / 1000;
+  const declared = items.reduce((s, it) => s + (Number(it.declaredValue) || 0), 0);
+  // Dimensions = the single largest box (by volume).
+  const vol = (it: Product) => (Number(it.lengthCm) || 0) * (Number(it.widthCm) || 0) * (Number(it.heightCm) || 0);
+  const biggest = items.reduce((a, b) => (vol(b) > vol(a) ? b : a), items[0]);
+  // Description lists every item.
+  const desc = items.map((it) => it.description || it.name || '').filter(Boolean).join(' + ') || (p?.name || '');
   const content = p?.content || 'OTHERS';
   const state = (order.receiverState && order.receiverState.trim())
     || stateFromPincode(order.receiverPincode);
@@ -58,12 +74,12 @@ export function buildDtdcRow(order: DtdcOrder, product: Product | undefined): (s
     CONST.shipmentType,                             // F  Shipment Type
     content,                                        // G  Content
     content === 'OTHERS' ? desc : '',               // H  If 'Others' please specify
-    Number(p?.declaredValue) || 0,                  // I  Declared Value
+    declared,                                       // I  Declared Value
     CONST.riskSurcharge,                            // J  Risk Surcharge
-    (Number(p?.weightG) || 0) / 1000,               // K  weight(kg)
-    Number(p?.lengthCm) || 0,                       // L  length(cm)
-    Number(p?.widthCm) || 0,                        // M  width(cm)
-    Number(p?.heightCm) || 0,                       // N  height(cm)
+    weightKg,                                       // K  weight(kg)
+    Number(biggest?.lengthCm) || 0,                 // L  length(cm)
+    Number(biggest?.widthCm) || 0,                  // M  width(cm)
+    Number(biggest?.heightCm) || 0,                 // N  height(cm)
     p?.senderPincode || '',                         // O  Sender's Pincode
     p?.senderName || '',                            // P  Sender's Name
     p?.senderPhone || '',                           // Q  Sender's Phone number
@@ -93,7 +109,7 @@ export function buildDtdcRow(order: DtdcOrder, product: Product | undefined): (s
 export function buildDtdcWorkbook(orders: DtdcOrder[], products: Product[]): Blob {
   const byId = new Map(products.map((p) => [p.productId, p]));
   const aoa: (string | number)[][] = [DTDC_HEADERS];
-  orders.forEach((o) => aoa.push(buildDtdcRow(o, byId.get(o.productId))));
+  orders.forEach((o) => aoa.push(buildDtdcRow(o, byId)));
 
   const ws = XLSX.utils.aoa_to_sheet(aoa);
   const wb = XLSX.utils.book_new();

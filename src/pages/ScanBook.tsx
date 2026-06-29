@@ -202,7 +202,7 @@ export const ScanBook = () => {
     }
 
     const rows: DtdcOrder[] = scanned.map((s) => ({
-      trackingId: s.trackingId, productId: s.productId,
+      trackingId: s.trackingId, productId: s.productId, extraProductIds: s.extraProductIds || [],
       receiverName: s.receiverName, receiverPhone: s.receiverPhone,
       receiverPincode: s.receiverPincode, receiverLine1: s.receiverLine1,
       receiverLine2: s.receiverLine2, receiverState: s.receiverState,

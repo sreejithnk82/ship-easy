@@ -86,6 +86,7 @@ export interface Product {
 }
 export interface OrderInput {
   clientOrderId: string; productId: string;
+  extraProductIds?: string[]; // up to 4 more products in the SAME parcel (one label)
   receiverName: string; receiverPhone: string; receiverPincode: string;
   receiverLine1: string; receiverLine2: string; receiverState: string;
 }
