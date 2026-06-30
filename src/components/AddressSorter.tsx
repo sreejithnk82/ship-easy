@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { X, RotateCcw, Check, MousePointerClick } from 'lucide-react';
-import { classifyLine } from '../lib/parser';
+import { classifyLines } from '../lib/parser';
 
 // Drag-and-drop (and tap-to-place) sorter: paste a block, each line becomes a
 // chip, drop chips into field zones. Pre-places phone/pincode and any labeled
@@ -40,21 +40,14 @@ export const AddressSorter = ({ rawInitial, onApply, onClose }: {
 
   useEffect(() => { rebuild(rawInitial); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
 
-  // (Re)build chips from the pasted text, pre-placing what we can.
+  // (Re)build chips from the pasted text, pre-placing Name / Phone / Pincode /
+  // Address as far as the heuristics can. Leftovers go to the pool.
   const rebuild = (text: string) => {
-    const lines = text.split('\n').map((l) => l.trim()).filter((l) => l && !/^[-=_*~.\s]+$/.test(l));
-    const z = EMPTY_ZONES();
-    const p: Chip[] = [];
-    lines.forEach((line) => {
-      const { text: t, zone } = classifyLine(line);
-      if (!t) return;
-      const chip: Chip = { id: 'c' + idRef.current++, text: t };
-      if (zone === '' || zone === 'state') { if (zone === '') p.push(chip); return; } // state derived later
-      const zk = zone as ZoneKey;
-      if (isMulti(zk) || z[zk].length === 0) z[zk] = [...z[zk], chip];
-      else p.push(chip); // single zone already filled → pool
-    });
-    setZones(z); setPool(p); setSelected(null);
+    const b = classifyLines(text);
+    const mk = (arr: string[]): Chip[] => arr.filter(Boolean).map((t) => ({ id: 'c' + idRef.current++, text: t }));
+    setZones({ name: mk(b.name), phone: mk(b.phone), pincode: mk(b.pincode), line1: mk(b.line1), line2: mk(b.line2) });
+    setPool(mk(b.pool));
+    setSelected(null);
   };
 
   // Move a chip (from anywhere) to a target zone or back to the pool.

@@ -142,34 +142,68 @@ export function parseRawAddress(rawText: string): ParsedAddress {
 }
 
 /* ------------------------------------------------------------------------- *
- * Single-line classifier — used by the drag-and-drop sorter to pre-place a
- * pasted line into a field zone and to strip any label prefix from the chip.
+ * Per-line bucketer for the drag-and-drop sorter. Same heuristics as
+ * parseRawAddress, but keeps ONE entry per line (so each becomes a draggable
+ * chip) and pre-places Name + Address too — not just phone/pincode. Anything it
+ * can't confidently place (product/marketing lines after the contact block,
+ * extra phone numbers) goes to `pool` for the operator to drag in.
  * ------------------------------------------------------------------------- */
 
-export type ChipZone = 'name' | 'phone' | 'pincode' | 'line1' | 'line2' | 'state' | '';
+export interface ClassifiedLines {
+  name: string[]; phone: string[]; pincode: string[];
+  line1: string[]; line2: string[]; pool: string[];
+}
 
-const LABEL_ZONE: Record<string, ChipZone> = {
-  name: 'name', address: 'line1', district: 'line2', state: 'state', pin: 'pincode', phone: 'phone',
-};
+export function classifyLines(text: string): ClassifiedLines {
+  const out: ClassifiedLines = { name: [], phone: [], pincode: [], line1: [], line2: [], pool: [] };
+  const lines = text.split('\n').map((l) => l.trim()).filter((l) => l && !/^[-=_*~.\s]+$/.test(l));
 
-/**
- * Classify one pasted line for the sorter. Returns the chip `text` (label prefix
- * removed) and the `zone` it should pre-fill ('' = leave in the unassigned pool).
- * Labels win; otherwise an obvious phone/pincode is detected. For phone/pincode
- * the text is normalized to just the extracted number.
- */
-export function classifyLine(line: string): { text: string; zone: ChipZone } {
-  const m = line.match(LABEL_RE);
-  if (m) {
-    const zone = LABEL_ZONE[labelKey(m[1])] || '';
-    const value = m[2].trim();
-    if (zone === 'phone') return { text: findMobile(value) || value, zone };
-    if (zone === 'pincode') return { text: findPincode(value) || value, zone };
-    return { text: value, zone };
+  type Cl = { i: number; label: string; value: string; phone?: string; pin?: string };
+  const cls: Cl[] = lines.map((line, i) => {
+    const m = line.match(LABEL_RE);
+    return { i, label: m ? labelKey(m[1]) : '', value: m ? m[2].trim() : line };
+  });
+
+  // Pass 1: phone + pincode (a line can carry both) and the contact-block end.
+  let lastContactIdx = -1;
+  let havePhone = false, havePin = false;
+  for (const c of cls) {
+    const ph = findMobile(c.value);
+    if (ph) { c.phone = ph; lastContactIdx = Math.max(lastContactIdx, c.i); if (!havePhone) { out.phone.push(ph); havePhone = true; } else out.pool.push(ph); }
+    const pin = findPincode(c.value);
+    if (pin) { c.pin = pin; lastContactIdx = Math.max(lastContactIdx, c.i); if (!havePin) { out.pincode.push(pin); havePin = true; } else out.pool.push(pin); }
   }
-  const ph = findMobile(line);
-  if (ph) return { text: ph, zone: 'phone' };
-  const pin = findPincode(line);
-  if (pin) return { text: pin, zone: 'pincode' };
-  return { text: line.trim(), zone: '' };
+
+  // Pass 2: name / address / district up to the contact block; rest → pool.
+  const limit = lastContactIdx >= 0 ? lastContactIdx : cls.length - 1;
+  const addr: string[] = [];
+  const dist: string[] = [];
+  let haveName = false;
+  for (const c of cls) {
+    if (c.i > limit) { out.pool.push(c.value); continue; }   // product/footer lines
+    if (c.phone || c.pin) continue;                          // already used as contact
+    if (c.label === 'phone' || c.label === 'pin') continue;  // label, no usable number
+    if (c.label === 'state') continue;                       // state derived from pincode
+    if (c.label === 'name') { if (!haveName) { out.name.push(clean(c.value)); haveName = true; } else out.pool.push(c.value); continue; }
+    if (c.label === 'district') { dist.push(c.value); continue; }
+    if (c.label === 'address') { addr.push(c.value); continue; }
+    if (isStateName(c.value)) continue;                      // bare state name → drop
+    if (!haveName) {
+      // First freeform line is the name; split off any address after a comma.
+      const ci = c.value.indexOf(',');
+      if (ci > 0) { out.name.push(clean(c.value.slice(0, ci))); const rest = c.value.slice(ci + 1).trim(); if (rest) addr.push(rest); }
+      else out.name.push(clean(c.value));
+      haveName = true;
+      continue;
+    }
+    addr.push(c.value);
+  }
+
+  const a = addr.map((p) => clean(p)).filter(Boolean);
+  const d = dist.map((p) => clean(p)).filter(Boolean);
+  if (d.length) { out.line1.push(...a); out.line2.push(...d); }
+  else if (a.length >= 2) { out.line2.push(a[a.length - 1]); out.line1.push(...a.slice(0, -1)); }
+  else { out.line1.push(...a); }
+
+  return out;
 }
