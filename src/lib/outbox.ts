@@ -8,10 +8,12 @@
 import { openDB } from 'idb';
 import type { OrderInput, Product } from './api';
 import type { LabelOrder } from './labels';
+import { istDayKey } from './datetime';
 
 export interface PendingOrder extends OrderInput {
   customerId: string;
   createdAt: number;
+  sourceText?: string; // the raw pasted address block, kept for reference on edit (local only)
 }
 
 // A completed, locked batch — kept so the user can view it later and
@@ -26,10 +28,25 @@ export interface SavedBatch {
   products: Product[]; // snapshot at generation time, so re-printing always works
 }
 
+// A locally-logged scan action (export or mark-shipped), so the scanning user can
+// review what they did each day on this device. Purely local — never sent up.
+export interface ScanLogEntry {
+  id: string;
+  customerId: string;
+  type: 'export' | 'shipped';
+  count: number;
+  trackingIds: string[];
+  states?: Record<string, number>; // receiver-state → count (for state-wise totals)
+  operator: string;
+  at: number;    // ms epoch
+  day: string;   // IST day key (yyyy-mm-dd)
+}
+
 const DB_NAME = 'shipeasy';
 const STORE = 'pending';
 const BATCHES = 'batches';
-const VERSION = 2;
+const SCANLOG = 'scanlog';
+const VERSION = 3;
 
 let dbp: Promise<any> | null = null;
 function db() {
@@ -43,6 +60,10 @@ function db() {
         if (!database.objectStoreNames.contains(BATCHES)) {
           const b = database.createObjectStore(BATCHES, { keyPath: 'batchId' });
           b.createIndex('byCustomer', 'customerId');
+        }
+        if (!database.objectStoreNames.contains(SCANLOG)) {
+          const s = database.createObjectStore(SCANLOG, { keyPath: 'id' });
+          s.createIndex('byCustomer', 'customerId');
         }
       },
     });
@@ -88,4 +109,18 @@ export async function saveBatch(batch: SavedBatch): Promise<void> {
 export async function listBatches(customerId: string): Promise<SavedBatch[]> {
   const all = (await (await db()).getAllFromIndex(BATCHES, 'byCustomer', customerId)) as SavedBatch[];
   return all.sort((a, b) => b.createdAt - a.createdAt); // newest first
+}
+
+// --- Scan activity log (local, per-device) ---
+
+export async function logScanActivity(e: Omit<ScanLogEntry, 'id' | 'at' | 'day'>): Promise<void> {
+  if (!e.count) return;
+  const at = Date.now();
+  const entry: ScanLogEntry = { ...e, id: newClientOrderId(), at, day: istDayKey(new Date(at)) };
+  try { await (await db()).put(SCANLOG, entry); } catch { /* ignore — logging must never block the action */ }
+}
+
+export async function listScanActivity(customerId: string): Promise<ScanLogEntry[]> {
+  const all = (await (await db()).getAllFromIndex(SCANLOG, 'byCustomer', customerId)) as ScanLogEntry[];
+  return all.sort((a, b) => b.at - a.at); // newest first
 }

@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
-import { ScanLine, FileSpreadsheet, Truck, Check, AlertTriangle, X, Pencil, Ban, Camera, Keyboard } from 'lucide-react';
-import { api, Product, OpenOrder } from '../lib/api';
+import { ScanLine, FileSpreadsheet, Truck, Check, AlertTriangle, X, Pencil, Ban, Camera, Keyboard, CalendarClock } from 'lucide-react';
+import { api, Product, OpenOrder, ShipmentReport } from '../lib/api';
 import { useProfile, isAdmin, canScan } from '../lib/profile';
 import { useToast, useConfirm } from '../components/feedback';
 import { CameraScanner } from '../components/CameraScanner';
-import { istDateLabel, istDateTimeLabel } from '../lib/datetime';
+import { istDateLabel, istDateTimeLabel, todayIstDayKey } from '../lib/datetime';
 import { useActiveCustomer } from '../lib/activeCustomer';
 import { downloadDtdc, DtdcOrder } from '../lib/dtdc';
 import { stateFromPincode } from '../lib/pincode';
@@ -32,7 +32,25 @@ export const ScanBook = () => {
   const [mode, setMode] = useState<'type' | 'camera'>(() => {
     try { return localStorage.getItem('shipeasy.scanMode') === 'camera' ? 'camera' : 'type'; } catch { return 'type'; }
   });
+  const [showReport, setShowReport] = useState(false);
+  const [report, setReport] = useState<ShipmentReport | null>(null);
+  const [reportLoading, setReportLoading] = useState(false);
+  const monthStart = todayIstDayKey().slice(0, 7) + '-01';
+  const [reportFrom, setReportFrom] = useState(monthStart);
+  const [reportTo, setReportTo] = useState(todayIstDayKey());
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Persist the in-progress scanned selection so a refresh/crash doesn't lose it.
+  const scannedKey = `shipeasy.scanned.${customerId}`;
+  const hydratedRef = useRef(false); // don't persist until the saved list is restored
+
+  const loadReport = async (from: string, to: string) => {
+    setReportLoading(true);
+    try { setReport(await api.shipmentReport(customerId, from, to)); }
+    catch (e: any) { notify('Report failed: ' + e.message, 'error'); setReport(null); }
+    finally { setReportLoading(false); }
+  };
+  const openReport = () => { setShowReport(true); loadReport(reportFrom, reportTo); };
 
   const changeMode = (m: 'type' | 'camera') => {
     setMode(m);
@@ -57,18 +75,33 @@ export const ScanBook = () => {
 
   useEffect(() => { if (customerId) load(); }, [customerId]);
 
+  // Persist the scanned selection whenever it changes (after the initial restore).
+  useEffect(() => {
+    if (!hydratedRef.current || !customerId) return;
+    try { localStorage.setItem(scannedKey, JSON.stringify(scanned.map((s) => s.trackingId))); } catch { /* ignore */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scanned]);
+
   const load = async () => {
     setLoading(true);
+    hydratedRef.current = false;
     try {
       const [{ orders }, { products }] = await Promise.all([
         api.listOpenOrders(customerId),
         api.listProducts(customerId),
       ]);
-      setOpenMap(new Map(orders.map((o) => [String(o.trackingId), o])));
+      const map = new Map(orders.map((o) => [String(o.trackingId), o] as [string, OpenOrder]));
+      setOpenMap(map);
       setProducts(products);
+      // Restore the in-progress scan from local storage, re-hydrating from the
+      // fresh open orders (drops anything no longer open — already shipped, etc.).
+      let saved: string[] = [];
+      try { saved = JSON.parse(localStorage.getItem(scannedKey) || '[]'); } catch { saved = []; }
+      setScanned(saved.map((id) => map.get(String(id))).filter(Boolean) as OpenOrder[]);
     } catch (e: any) {
       setFlash({ kind: 'err', text: 'Load failed: ' + e.message });
     } finally {
+      hydratedRef.current = true;
       setLoading(false);
       inputRef.current?.focus();
     }
@@ -218,6 +251,7 @@ export const ScanBook = () => {
       const ids = scanned.map((s) => s.trackingId);
       const res = await api.commitShipment(customerId, ids);
       setOpenMap((prev) => { const m = new Map(prev); res.marked.forEach((id) => m.delete(id)); return m; });
+      try { localStorage.removeItem(scannedKey); } catch { /* ignore */ }
       setScanned([]);
       setFlash({ kind: 'ok', text: `Shipped ${res.marked.length}. ${res.alreadyShipped.length} already shipped, ${res.notFound.length} not found.` });
     } catch (e: any) {
@@ -237,9 +271,14 @@ export const ScanBook = () => {
 
   return (
     <div className="fade-in" style={{ paddingBottom: '4rem' }}>
-      <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-        <ScanLine size={28} style={{ color: 'var(--primary-color)' }} /> Scan & Book
-      </h1>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap' }}>
+        <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', margin: 0 }}>
+          <ScanLine size={28} style={{ color: 'var(--primary-color)' }} /> Scan & Book
+        </h1>
+        <button className="btn btn-outline" onClick={openReport} style={{ width: 'auto', padding: '0.4rem 0.8rem', fontSize: '0.85rem' }}>
+          <CalendarClock size={16} /> Shipment report
+        </button>
+      </div>
 
       <div className="glass-card" style={{ marginBottom: '1.5rem' }}>
         <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.85rem' }}>
@@ -346,6 +385,16 @@ export const ScanBook = () => {
           </div>
         </div>
       )}
+
+      {showReport && (
+        <ShipmentReportModal
+          report={report} loading={reportLoading}
+          from={reportFrom} to={reportTo}
+          onFrom={(v) => { setReportFrom(v); loadReport(v, reportTo); }}
+          onTo={(v) => { setReportTo(v); loadReport(reportFrom, v); }}
+          onClose={() => setShowReport(false)}
+        />
+      )}
     </div>
   );
 };
@@ -366,3 +415,64 @@ function normId(s: string): string {
 function countBy<T>(arr: T[], key: (t: T) => string): Record<string, number> {
   return arr.reduce((acc, x) => { const k = key(x); acc[k] = (acc[k] || 0) + 1; return acc; }, {} as Record<string, number>);
 }
+
+// Server-backed, per-day, state-wise SHIPPED report for the current customer —
+// the billing source of truth (state charges differ). Accurate across devices.
+const ShipmentReportModal = ({ report, loading, from, to, onFrom, onTo, onClose }: {
+  report: ShipmentReport | null; loading: boolean; from: string; to: string;
+  onFrom: (v: string) => void; onTo: (v: string) => void; onClose: () => void;
+}) => {
+  const totals = report ? Object.entries(report.totals).sort((a, b) => b[1] - a[1]) : [];
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 3000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1.25rem' }}>
+      <div onClick={(e) => e.stopPropagation()} className="glass-card slide-up modal-card" style={{ width: '100%', maxWidth: 480, background: 'white', maxHeight: '90vh', overflowY: 'auto' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+          <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}><CalendarClock size={20} /> Shipment report</h3>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={22} /></button>
+        </div>
+        <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: '0 0 0.6rem' }}>Shipped parcels by day and state (IST) — for billing.</p>
+
+        <div style={{ display: 'flex', gap: '0.6rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
+          <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>From
+            <input type="date" className="input-field" value={from} max={to} onChange={(e) => onFrom(e.target.value)} style={{ marginTop: '0.15rem' }} />
+          </label>
+          <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>To
+            <input type="date" className="input-field" value={to} min={from} onChange={(e) => onTo(e.target.value)} style={{ marginTop: '0.15rem' }} />
+          </label>
+        </div>
+
+        {loading ? <p style={{ color: 'var(--text-secondary)' }}>Loading…</p> : !report ? (
+          <p style={{ color: 'var(--text-secondary)' }}>Couldn't load the report.</p>
+        ) : report.total === 0 ? (
+          <p style={{ color: 'var(--text-secondary)' }}>No shipments in this range.</p>
+        ) : (
+          <>
+            {/* Period totals by state — the billing figures */}
+            <div style={{ background: 'var(--bg-color)', borderRadius: 'var(--radius-md)', padding: '0.6rem 0.75rem', marginBottom: '0.9rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, marginBottom: '0.35rem' }}>
+                <span>Period total</span><span>{report.total} shipped</span>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem' }}>
+                {totals.map(([st, n]) => <span key={st} className="badge badge-primary" style={{ fontSize: '0.75rem' }}>{st}: {n}</span>)}
+              </div>
+            </div>
+
+            {report.days.map((d) => (
+              <div key={d.day} style={{ padding: '0.55rem 0', borderBottom: '1px solid var(--border-color)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <strong>{istDateLabel(d.day)}</strong>
+                  <span className="badge badge-completed">{d.total} shipped</span>
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem', marginTop: '0.4rem' }}>
+                  {Object.entries(d.states).sort((a, b) => b[1] - a[1]).map(([st, n]) => (
+                    <span key={st} className="badge badge-gray" style={{ fontSize: '0.72rem' }}>{st}: {n}</span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </>
+        )}
+      </div>
+    </div>
+  );
+};

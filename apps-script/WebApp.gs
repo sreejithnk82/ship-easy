@@ -63,7 +63,7 @@ var READ_ACTIONS_ = {
   getProfile: 1, listProducts: 1, listSenderAddresses: 1, listOpenOrders: 1,
   listOrders: 1, customerBalance: 1, listCustomers: 1, listHubCodes: 1,
   listUsers: 1, listTrackingRanges: 1, listBalances: 1, customerHealth: 1,
-  listServiceablePincodes: 1,
+  listServiceablePincodes: 1, shipmentReport: 1,
 };
 
 /** The maintenance message if the pause is on, else '' (off). */
@@ -110,6 +110,7 @@ function dispatch_(action, payload, ctx) {
     case 'voidOrder':      return action_voidOrder_(payload, ctx);
     case 'recordExport':   return action_recordExport_(payload, ctx);
     case 'listOrders':     return action_listOrders_(payload, ctx);
+    case 'shipmentReport': return action_shipmentReport_(payload, ctx);
     case 'customerBalance':return action_customerBalance_(payload, ctx);
     // superadmin onboarding
     case 'listCustomers':      return action_listCustomers_(payload, ctx);

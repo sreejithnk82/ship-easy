@@ -7,7 +7,7 @@ import { classifyLines } from '../lib/parser';
 // lines. Custom Pointer-Event DnD (no library) so it works on touch; a
 // tap-a-chip-then-tap-a-zone fallback covers devices where drag is fiddly.
 
-export interface SortedFields { name: string; phone: string; pincode: string; line1: string; line2: string; }
+export interface SortedFields { name: string; phone: string; pincode: string; line1: string; line2: string; hints: string; }
 
 type Chip = { id: string; text: string };
 type ZoneKey = 'name' | 'phone' | 'pincode' | 'line1' | 'line2';
@@ -117,6 +117,7 @@ export const AddressSorter = ({ rawInitial, onApply, onClose }: {
       pincode: join(zones.pincode, ' '),
       line1: join(zones.line1, ', '),
       line2: join(zones.line2, ', '),
+      hints: join(pool, ' '), // leftover chips = product hints for ranking the dropdown
     });
   };
 

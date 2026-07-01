@@ -41,6 +41,7 @@ export const AddOrder = () => {
   const [attempted, setAttempted] = useState(false);
   const [sorting, setSorting] = useState(false); // drag-and-drop sorter modal open
   const [showCounts, setShowCounts] = useState(false); // product-count popup
+  const [productHints, setProductHints] = useState(''); // leftover sorter lines → rank products
   const [generating, setGenerating] = useState(false);
   const [loadingProducts, setLoadingProducts] = useState(true);
   const [loadingBalance, setLoadingBalance] = useState(true);
@@ -113,6 +114,7 @@ export const AddOrder = () => {
       line1: s.line1 || prev.line1,
       line2: s.line2 || prev.line2,
     }));
+    setProductHints(s.hints || '');
     setAttempted(true);
     setSorting(false);
   };
@@ -139,6 +141,7 @@ export const AddOrder = () => {
       receiverLine2: ff.line2.trim(),
       receiverState: (ff.state || stateFromPincode(ff.pincode)).trim(),
       createdAt: existing?.createdAt ?? Date.now(),
+      sourceText: raw.trim() || existing?.sourceText, // keep the pasted block for later reference
     };
     await addPending(order); // put() upserts by clientOrderId
     try { localStorage.setItem(lastProductKey, ff.productId); } catch { /* ignore */ }
@@ -147,7 +150,7 @@ export const AddOrder = () => {
   };
 
   const startEdit = (o: PendingOrder) => {
-    setRaw('');
+    setRaw(o.sourceText || ''); // show what was originally pasted
     setEditId(o.clientOrderId);
     setAttempted(false);
     setF({
@@ -245,16 +248,27 @@ export const AddOrder = () => {
   const productById = new Map(products.map((p) => [p.productId, p]));
   // Only verified products can be booked (members add products as "pending").
   const bookable = products.filter((p) => p.status !== 'pending');
-  // Float the last-used product to the top of the dropdown.
+  // Rank the dropdown: products matching the sorter's leftover hints float to the
+  // top; ties fall back to the last-used product; then original order.
   const lastProductId = getLastProduct();
-  const bookableSorted = lastProductId
-    ? [...bookable].sort((a, b) => (b.productId === lastProductId ? 1 : 0) - (a.productId === lastProductId ? 1 : 0))
+  const hintTokens = productHints.toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length >= 2);
+  const hintScore = (p: Product) => {
+    if (!hintTokens.length) return 0;
+    const hay = `${p.name} ${p.content || ''} ${p.description || ''}`.toLowerCase();
+    return hintTokens.reduce((s, t) => s + (hay.includes(t) ? 1 : 0), 0);
+  };
+  const bookableSorted = (hintTokens.length || lastProductId)
+    ? [...bookable].sort((a, b) => {
+        const d = hintScore(b) - hintScore(a);
+        if (d) return d;
+        return (b.productId === lastProductId ? 1 : 0) - (a.productId === lastProductId ? 1 : 0);
+      })
     : bookable;
 
   // Open the Add form fresh. The last product is floated to the top of the
   // dropdown but NOT pre-selected — the operator still picks deliberately.
   const openAdd = () => {
-    setRaw(''); setEditId(null); setAttempted(false); setF({ ...EMPTY }); setAdding(true);
+    setRaw(''); setEditId(null); setAttempted(false); setProductHints(''); setF({ ...EMPTY }); setAdding(true);
   };
 
   // Field-level validity → drives the inline red highlights. Only surfaced once
@@ -269,7 +283,7 @@ export const AddOrder = () => {
   };
   const err = (k: keyof typeof errs) => (attempted ? errs[k] : '');
 
-  const closeForm = () => { setRaw(''); setEditId(null); setF({ ...EMPTY }); setAttempted(false); setAdding(false); };
+  const closeForm = () => { setRaw(''); setEditId(null); setF({ ...EMPTY }); setAttempted(false); setProductHints(''); setAdding(false); };
 
   if (!customerId) {
     return <div><h1 className="page-title">Book Orders</h1>
@@ -402,6 +416,12 @@ export const AddOrder = () => {
                   {o.extraProductIds && o.extraProductIds.length > 0 && ` +${o.extraProductIds.length} more`}
                 </span>
               </div>
+              {o.sourceText && (
+                <details style={{ marginTop: '0.6rem' }}>
+                  <summary style={{ cursor: 'pointer', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Pasted text</summary>
+                  <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: '0.75rem', color: 'var(--text-secondary)', margin: '0.35rem 0 0', background: 'var(--bg-color)', padding: '0.45rem 0.55rem', borderRadius: 'var(--radius-md)', fontFamily: 'inherit' }}>{o.sourceText}</pre>
+                </details>
+              )}
             </div>
           ))}
         </div>

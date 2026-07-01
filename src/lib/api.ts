@@ -103,6 +103,8 @@ export interface OrderRow {
 }
 export interface Balance { customerId: string; name: string; remaining: number; low: boolean; }
 export interface Health { orderRows: number; columns: number; orderCells: number; cellLimit: number; warn: boolean; pctOfLimit: number; }
+export interface ShipmentReportDay { day: string; total: number; states: Record<string, number>; }
+export interface ShipmentReport { days: ShipmentReportDay[]; totals: Record<string, number>; total: number; }
 
 export interface Customer {
   customerId: string; name: string; spreadsheetId?: string;
@@ -156,6 +158,8 @@ export const api = {
       'recordExport', { customerId, trackingIds, exportId }),
   listOrders: (customerId: string, limit?: number) =>
     callApi<{ orders: OrderRow[] }>('listOrders', { customerId, limit }),
+  shipmentReport: (customerId: string, fromDay?: string, toDay?: string) =>
+    callApi<ShipmentReport>('shipmentReport', { customerId, fromDay, toDay }),
   customerBalance: (customerId: string) =>
     callApi<{ remaining: number; threshold: number; low: boolean }>('customerBalance', { customerId }),
   listBalances: () => callApi<{ balances: Balance[]; threshold: number }>('listBalances'),

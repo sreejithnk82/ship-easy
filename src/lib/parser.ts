@@ -17,9 +17,6 @@ export interface ParsedAddress {
   line2: string;
 }
 
-// "label: value" / "label - value" at the start of a line.
-const LABEL_RE = /^\s*(name|address|addr|district|dist|state|pin\s*code|pincode|pin|contact\s*number|contact|phone|mobile|mob|whatsapp|ph)\s*[:\-]\s*(.*)$/i;
-
 const STATES = new Set([
   'andhra pradesh', 'arunachal pradesh', 'assam', 'bihar', 'chhattisgarh', 'goa', 'gujarat',
   'haryana', 'himachal pradesh', 'jharkhand', 'karnataka', 'kerala', 'madhya pradesh',
@@ -29,15 +26,66 @@ const STATES = new Set([
   'andaman and nicobar islands', 'dadra and nagar haveli', 'daman and diu', 'lakshadweep',
 ]);
 
-function labelKey(raw: string): string {
-  const k = raw.toLowerCase().replace(/\s+/g, '');
-  if (k.startsWith('name')) return 'name';
-  if (k.startsWith('address') || k === 'addr') return 'address';
-  if (k.startsWith('district') || k === 'dist') return 'district';
-  if (k.startsWith('state')) return 'state';
-  if (k.startsWith('pin')) return 'pin';
-  if (k.startsWith('contact') || k.startsWith('phone') || k.startsWith('mobile') || k === 'mob' || k === 'ph' || k === 'whatsapp') return 'phone';
-  return '';
+// Known label spellings → canonical field key. Includes common abbreviations and
+// concatenated multi-word forms ("contactnumber") so the fuzzy match below stays
+// a small edit-distance away from real-world typos.
+const LABELS: [string, string][] = [
+  ['name', 'name'], ['nam', 'name'], ['naam', 'name'], ['customername', 'name'], ['custname', 'name'],
+  ['address', 'address'], ['addres', 'address'], ['addr', 'address'], ['add', 'address'],
+  ['location', 'address'], ['place', 'address'], ['house', 'address'], ['building', 'address'], ['landmark', 'address'], ['area', 'address'],
+  ['district', 'district'], ['dist', 'district'], ['town', 'district'], ['city', 'district'], ['taluk', 'district'],
+  ['state', 'state'],
+  ['pincode', 'pin'], ['pin', 'pin'], ['pinno', 'pin'], ['postcode', 'pin'], ['postalcode', 'pin'], ['zip', 'pin'], ['zipcode', 'pin'],
+  ['phone', 'phone'], ['phoneno', 'phone'], ['phonenumber', 'phone'], ['phno', 'phone'],
+  ['mobile', 'phone'], ['mobileno', 'phone'], ['mobilenumber', 'phone'], ['mob', 'phone'], ['mobno', 'phone'],
+  ['contact', 'phone'], ['contactno', 'phone'], ['contactnumber', 'phone'], ['whatsapp', 'phone'], ['number', 'phone'], ['cell', 'phone'], ['ph', 'phone'],
+];
+
+/** Levenshtein edit distance (small strings only). */
+function lev(a: string, b: string): number {
+  const m = a.length, n = b.length;
+  if (!m) return n;
+  if (!n) return m;
+  let prev = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++) {
+    const cur = [i];
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost);
+    }
+    prev = cur;
+  }
+  return prev[n];
+}
+
+/** Fuzzy-map a normalized label token to a field key, tolerating spelling slips. */
+function fuzzyLabelKey(norm: string): string {
+  let best = '', bestD = Infinity;
+  for (const [word, key] of LABELS) {
+    const d = lev(norm, word);
+    if (d < bestD) { bestD = d; best = key; }
+  }
+  // Short tokens must match (almost) exactly; longer ones tolerate more slips.
+  const thr = norm.length <= 2 ? 0 : norm.length <= 4 ? 1 : 2;
+  return bestD <= thr ? best : '';
+}
+
+/**
+ * If a line is "label: value" / "label - value" with a (possibly misspelled)
+ * known label, return {key, value}; otherwise null. The label must be a short
+ * alphabetic token before the first ':' (or '-'), so address lines that merely
+ * contain a dash aren't mistaken for labels.
+ */
+function matchLabel(line: string): { key: string; value: string } | null {
+  let idx = line.indexOf(':');
+  if (idx < 0) idx = line.indexOf('-');
+  if (idx <= 0) return null;
+  const candidate = line.slice(0, idx).trim();
+  if (!candidate || candidate.length > 20 || !/^[A-Za-z][A-Za-z .]*$/.test(candidate)) return null;
+  const norm = candidate.toLowerCase().replace(/[^a-z]/g, '');
+  if (!norm) return null;
+  const key = fuzzyLabelKey(norm);
+  return key ? { key, value: line.slice(idx + 1).trim() } : null;
 }
 
 /** First Indian mobile (10 digits, starts 6-9) in the string, tolerating +91/0 and spaces. */
@@ -67,8 +115,8 @@ export function parseRawAddress(rawText: string): ParsedAddress {
 
   type Cl = { i: number; label: string; value: string; phone?: string; pin?: string };
   const cls: Cl[] = lines.map((line, i) => {
-    const m = line.match(LABEL_RE);
-    return { i, label: m ? labelKey(m[1]) : '', value: m ? m[2].trim() : line };
+    const ml = matchLabel(line);
+    return { i, label: ml ? ml.key : '', value: ml ? ml.value : line };
   });
 
   // Pass 1: pull out phone + pincode (a line can carry BOTH, e.g.
@@ -160,8 +208,8 @@ export function classifyLines(text: string): ClassifiedLines {
 
   type Cl = { i: number; label: string; value: string; phone?: string; pin?: string };
   const cls: Cl[] = lines.map((line, i) => {
-    const m = line.match(LABEL_RE);
-    return { i, label: m ? labelKey(m[1]) : '', value: m ? m[2].trim() : line };
+    const ml = matchLabel(line);
+    return { i, label: ml ? ml.key : '', value: ml ? ml.value : line };
   });
 
   // Pass 1: phone + pincode (a line can carry both) and the contact-block end.
