@@ -303,7 +303,23 @@ export const SuperAdmin = () => {
           <div style={{ fontSize: '0.85rem' }}>
             {loading && <div style={{ color: 'var(--text-secondary)' }}>Loading…</div>}
             {!loading && users.length === 0 && <div style={{ color: 'var(--text-secondary)' }}>No users yet.</div>}
-            {users.map((u) => <div key={u.email} style={{ padding: '0.2rem 0' }}>{u.email} — <strong>{u.role}</strong>{u.customerId ? ` · ${u.customerId}` : ''}</div>)}
+            {(() => {
+              const custName = new Map(customers.map((c) => [c.customerId, c.name]));
+              const groupOf = (u: UserRow) => (u.customerId ? (custName.get(u.customerId) || u.customerId) : 'All groups');
+              const roleClass = (r: string) => (r === 'superadmin' || r === 'admin' ? 'badge-primary' : r === 'operator' ? 'badge-processing' : 'badge-gray');
+              const sorted = [...users].sort((a, b) => groupOf(a).localeCompare(groupOf(b)) || a.email.localeCompare(b.email));
+              return sorted.map((u) => (
+                <div key={u.email} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', padding: '0.5rem 0', borderBottom: '1px solid var(--border-color)' }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.email}</div>
+                    <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                      {groupOf(u)}{u.status && u.status !== 'active' ? ` · ${u.status}` : ''}
+                    </div>
+                  </div>
+                  <span className={`badge ${roleClass(u.role)}`} style={{ textTransform: 'capitalize', flex: '0 0 auto' }}>{u.role}</span>
+                </div>
+              ));
+            })()}
           </div>
         </div>
         );

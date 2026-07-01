@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Package, Save, Plus, X, Pencil, Trash2, MapPin, BadgeCheck, Clock } from 'lucide-react';
+import { Package, Save, Plus, X, Pencil, Trash2, MapPin, BadgeCheck, Clock, Tag } from 'lucide-react';
 import { api, Product, HubCode, SenderAddress } from '../lib/api';
 import { ApiError } from '../lib/api';
 import { useProfile, isAdmin } from '../lib/profile';
@@ -45,6 +45,7 @@ export const Products = () => {
   const [form, setForm] = useState<FormState>({ ...EMPTY });
   const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [showVariantEditor, setShowVariantEditor] = useState(false);
 
   useEffect(() => { if (customerId) load(); else { setProducts([]); setLoading(false); } }, [customerId]);
 
@@ -216,8 +217,13 @@ export const Products = () => {
 
           <div className="input-group" style={{ margin: '0.75rem 0 0' }}>
             <label className="input-label">Variants / sub-types (optional)</label>
-            <input className="input-field" value={form.variants} placeholder="e.g. Red, Blue, 100ml — comma separated"
-              onChange={(e) => set('variants')(e.target.value)} />
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'stretch' }}>
+              <input className="input-field" readOnly value={form.variants} placeholder="No variants"
+                style={{ flex: 1, background: 'var(--bg-color)', cursor: 'default' }} />
+              <button type="button" className="btn btn-outline" onClick={() => setShowVariantEditor(true)} style={{ width: 'auto', whiteSpace: 'nowrap' }}>
+                <Tag size={16} /> Edit variants
+              </button>
+            </div>
             <p style={{ margin: '0.35rem 0 0', fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
               Same weight &amp; size for all — the chosen label is added to the order and DTDC description.
             </p>
@@ -269,6 +275,78 @@ export const Products = () => {
               )}
             </div>
           ))}
+      </div>
+
+      {showVariantEditor && (
+        <VariantEditor
+          initial={parseVariants(form.variants)}
+          onSave={(list) => set('variants')(list.join(', '))}
+          onClose={() => setShowVariantEditor(false)}
+        />
+      )}
+    </div>
+  );
+};
+
+// Full-screen editor for a product's variant labels. Add via the blank box at
+// the bottom (or Enter), edit each row in place, remove with ✕. Save writes the
+// cleaned, de-duplicated list back to the product form.
+const VariantEditor = ({ initial, onSave, onClose }: { initial: string[]; onSave: (list: string[]) => void; onClose: () => void }) => {
+  const [rows, setRows] = useState<string[]>(initial);
+  const [draft, setDraft] = useState('');
+
+  const setRow = (i: number, v: string) => setRows((r) => r.map((x, j) => (j === i ? v : x)));
+  const removeRow = (i: number) => setRows((r) => r.filter((_, j) => j !== i));
+  const add = () => {
+    const parts = parseVariants(draft); // a pasted "Red, Blue" expands into rows
+    if (parts.length) setRows((r) => [...r, ...parts]);
+    setDraft('');
+  };
+  const save = () => {
+    const seen = new Set<string>();
+    const cleaned = rows.map((v) => v.trim()).filter((v) => {
+      if (!v) return false;
+      const k = v.toLowerCase();
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+    onSave(cleaned);
+    onClose();
+  };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 2500, background: 'var(--bg-color)', overflowY: 'auto' }}>
+      <div className="slide-up" style={{ maxWidth: 560, margin: '0 auto', padding: '1.25rem 1.25rem 4rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+          <h2 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}><Tag size={22} /> Edit variants</h2>
+          <button onClick={onClose} title="Close" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', padding: '0.25rem' }}><X size={26} /></button>
+        </div>
+
+        <p style={{ margin: '0 0 1rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+          One variant per row (e.g. Red, Blue, 100ml). Same weight &amp; size for all.
+        </p>
+
+        {rows.length === 0 && <p style={{ color: 'var(--text-secondary)', fontStyle: 'italic', marginBottom: '1rem' }}>No variants yet — add one below.</p>}
+
+        {rows.map((v, i) => (
+          <div key={i} style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '0.5rem' }}>
+            <input className="input-field" value={v} onChange={(e) => setRow(i, e.target.value)} placeholder="Variant label" style={{ flex: 1 }} />
+            <button type="button" title="Remove" onClick={() => removeRow(i)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger-color)', padding: '0.35rem' }}><X size={20} /></button>
+          </div>
+        ))}
+
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginTop: '0.75rem' }}>
+          <input className="input-field" value={draft} placeholder="Add a variant…" style={{ flex: 1 }}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } }} />
+          <button type="button" className="btn btn-outline" onClick={add} disabled={!draft.trim()} style={{ width: 'auto' }}><Plus size={16} /> Add</button>
+        </div>
+
+        <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.75rem' }}>
+          <button className="btn btn-outline" onClick={onClose} style={{ flex: '0 0 auto' }}>Cancel</button>
+          <button className="btn btn-primary" onClick={save} style={{ flex: 1 }}><Save size={18} /> Save variants</button>
+        </div>
       </div>
     </div>
   );
