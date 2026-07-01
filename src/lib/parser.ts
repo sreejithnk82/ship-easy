@@ -109,9 +109,25 @@ function clean(s: string): string {
   return s.replace(/[,;]+\s*$/, '').trim();
 }
 
+/** Max chips we build from one paste — a guard against a runaway blob of text. */
+export const MAX_ADDRESS_CHIPS = 15;
+
+/**
+ * Break a pasted block into atomic tokens: split on newlines AND commas, so a
+ * single-line comma-separated address ("Sumesh, veedu, mankada post, 673456,
+ * ph:6767892345") still yields one token per field. Blank and separator-only
+ * fragments ("----", "===") are dropped.
+ */
+export function splitAddressTokens(text: string): string[] {
+  return text
+    .split('\n')
+    .flatMap((l) => l.split(','))
+    .map((l) => l.trim())
+    .filter((l) => l && !/^[-=_*~.\s]+$/.test(l));
+}
+
 export function parseRawAddress(rawText: string): ParsedAddress {
-  // Keep real content lines; drop blank and separator-only lines ("----", "===").
-  const lines = rawText.split('\n').map((l) => l.trim()).filter((l) => l && !/^[-=_*~.\s]+$/.test(l));
+  const lines = splitAddressTokens(rawText);
 
   type Cl = { i: number; label: string; value: string; phone?: string; pin?: string };
   const cls: Cl[] = lines.map((line, i) => {
@@ -204,7 +220,9 @@ export interface ClassifiedLines {
 
 export function classifyLines(text: string): ClassifiedLines {
   const out: ClassifiedLines = { name: [], phone: [], pincode: [], line1: [], line2: [], pool: [] };
-  const lines = text.split('\n').map((l) => l.trim()).filter((l) => l && !/^[-=_*~.\s]+$/.test(l));
+  // One token per field (splits single-line, comma-separated pastes too), capped
+  // so a giant paste can't spawn hundreds of chips.
+  const lines = splitAddressTokens(text).slice(0, MAX_ADDRESS_CHIPS);
 
   type Cl = { i: number; label: string; value: string; phone?: string; pin?: string };
   const cls: Cl[] = lines.map((line, i) => {
@@ -229,13 +247,13 @@ export function classifyLines(text: string): ClassifiedLines {
   let haveName = false;
   for (const c of cls) {
     if (c.i > limit) { out.pool.push(c.value); continue; }   // product/footer lines
-    if (c.phone || c.pin) continue;                          // already used as contact
-    if (c.label === 'phone' || c.label === 'pin') continue;  // label, no usable number
-    if (c.label === 'state') continue;                       // state derived from pincode
+    if (c.phone || c.pin) continue;                          // number already placed as a chip
+    if (c.label === 'phone' || c.label === 'pin') { out.pool.push(c.value); continue; } // label, no usable number → keep as a chip
+    if (c.label === 'state') { out.pool.push(clean(c.value)); continue; } // state derived from pincode, but keep the chip
     if (c.label === 'name') { if (!haveName) { out.name.push(clean(c.value)); haveName = true; } else out.pool.push(c.value); continue; }
     if (c.label === 'district') { dist.push(c.value); continue; }
     if (c.label === 'address') { addr.push(c.value); continue; }
-    if (isStateName(c.value)) continue;                      // bare state name → drop
+    if (isStateName(c.value)) { out.pool.push(clean(c.value)); continue; } // bare state name → keep as a chip
     if (!haveName) {
       // First freeform line is the name; split off any address after a comma.
       const ci = c.value.indexOf(',');

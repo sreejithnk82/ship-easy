@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
-import { X, RotateCcw, Check, MousePointerClick } from 'lucide-react';
-import { classifyLines } from '../lib/parser';
+import { X, RotateCcw, Check, MousePointerClick, AlertTriangle } from 'lucide-react';
+import { classifyLines, splitAddressTokens, MAX_ADDRESS_CHIPS } from '../lib/parser';
 
 // Drag-and-drop (and tap-to-place) sorter: paste a block, each line becomes a
 // chip, drop chips into field zones. Pre-places phone/pincode and any labeled
@@ -34,6 +34,7 @@ export const AddressSorter = ({ rawInitial, onApply, onClose }: {
   const [selected, setSelected] = useState<string | null>(null);
   const [drag, setDrag] = useState<{ text: string; x: number; y: number } | null>(null);
   const [overZone, setOverZone] = useState<Target | null>(null);
+  const [truncated, setTruncated] = useState(false); // paste had more than MAX_ADDRESS_CHIPS tokens
 
   const idRef = useRef(0);
   const startRef = useRef<{ id: string; text: string; x: number; y: number; moved: boolean } | null>(null);
@@ -47,6 +48,7 @@ export const AddressSorter = ({ rawInitial, onApply, onClose }: {
     const mk = (arr: string[]): Chip[] => arr.filter(Boolean).map((t) => ({ id: 'c' + idRef.current++, text: t }));
     setZones({ name: mk(b.name), phone: mk(b.phone), pincode: mk(b.pincode), line1: mk(b.line1), line2: mk(b.line2) });
     setPool(mk(b.pool));
+    setTruncated(splitAddressTokens(text).length > MAX_ADDRESS_CHIPS);
     setSelected(null);
   };
 
@@ -163,6 +165,12 @@ export const AddressSorter = ({ rawInitial, onApply, onClose }: {
         <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', margin: '0 0 0.5rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
           <MousePointerClick size={14} /> Drag a chip into a field — or tap a chip, then tap a field.
         </p>
+
+        {truncated && (
+          <p style={{ fontSize: '0.78rem', color: 'var(--warning-color)', margin: '0 0 0.5rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+            <AlertTriangle size={14} /> Showing the first {MAX_ADDRESS_CHIPS} items only — trim the text above if something is missing.
+          </p>
+        )}
 
         {/* Unassigned chip pool */}
         <div data-zone="pool" onClick={() => onZoneClick('pool')}
