@@ -34,6 +34,8 @@ export interface DtdcOrder {
   trackingId: string;
   productId: string;
   extraProductIds?: string[]; // additional products in the same parcel
+  variant?: string;           // chosen sub-type label for the primary product
+  extraVariants?: string[];   // labels index-aligned with extraProductIds
   receiverName: string;
   receiverPhone: string;
   receiverPincode: string;
@@ -49,8 +51,16 @@ export interface DtdcOrder {
  * all items. Sender / hub / content come from the primary (first) product.
  */
 export function buildDtdcRow(order: DtdcOrder, byId: Map<string, Product>): (string | number)[] {
-  const ids = [order.productId, ...(order.extraProductIds || [])].filter(Boolean);
-  const items = ids.map((id) => byId.get(id)).filter(Boolean) as Product[];
+  // Pair each product id with its chosen variant label, keeping index alignment
+  // (primary first), then resolve products and drop any that no longer exist.
+  const rawIds = [order.productId, ...(order.extraProductIds || [])];
+  const rawVars = [order.variant || '', ...(order.extraVariants || [])];
+  const entries = rawIds
+    .map((id, i) => ({ id, v: rawVars[i] || '' }))
+    .filter((e) => e.id)
+    .map((e) => ({ p: byId.get(e.id), v: e.v }))
+    .filter((e) => e.p) as { p: Product; v: string }[];
+  const items = entries.map((e) => e.p);
   const p = items[0]; // primary → sender, hub, content
 
   // Sum weight + value across all items.
@@ -59,8 +69,11 @@ export function buildDtdcRow(order: DtdcOrder, byId: Map<string, Product>): (str
   // Dimensions = the single largest box (by volume).
   const vol = (it: Product) => (Number(it.lengthCm) || 0) * (Number(it.widthCm) || 0) * (Number(it.heightCm) || 0);
   const biggest = items.reduce((a, b) => (vol(b) > vol(a) ? b : a), items[0]);
-  // Description lists every item.
-  const desc = items.map((it) => it.description || it.name || '').filter(Boolean).join(' + ') || (p?.name || '');
+  // Description lists every item, with its variant label appended when present.
+  const desc = entries.map((e) => {
+    const base = e.p.description || e.p.name || '';
+    return e.v ? `${base} - ${e.v}` : base;
+  }).filter(Boolean).join(' + ') || (p?.name || '');
   const content = p?.content || 'OTHERS';
   const state = (order.receiverState && order.receiverState.trim())
     || stateFromPincode(order.receiverPincode);

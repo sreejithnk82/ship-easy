@@ -67,6 +67,9 @@ function productFromRow_(r, addrById) {
     lengthCm: Number(r.length_cm) || 0,
     widthCm: Number(r.width_cm) || 0,
     heightCm: Number(r.height_cm) || 0,
+    // Optional sub-type labels (color / material / ml …). Same shipping profile;
+    // the chosen label is recorded on the order, not a separate product.
+    variants: parseIdList_(r.variants),
     // Approval workflow: blank/legacy rows count as verified; new member-added
     // products start 'pending' until an admin/superadmin verifies them.
     status: r.status ? String(r.status) : 'verified',
@@ -85,7 +88,17 @@ var PRODUCT_COLMAP = {
   senderPincode: 'sender_pincode', senderEmail: 'sender_email', content: 'content',
   description: 'description', declaredValue: 'declared_value', weightG: 'weight_g',
   lengthCm: 'length_cm', widthCm: 'width_cm', heightCm: 'height_cm',
+  variants: 'variants',
 };
+
+// The client sends `variants` as an array of labels; store it as a JSON string
+// in the single `variants` cell (parseIdList_ reads it back on the way out).
+function normalizeProductPayload_(p) {
+  if (p && Array.isArray(p.variants)) {
+    p.variants = JSON.stringify(p.variants.map(function (v) { return String(v).trim(); }).filter(String));
+  }
+  return p;
+}
 
 // All sheet columns a product may write, so we can migrate older Products sheets
 // that predate sender_address_id before any add/update.
@@ -112,7 +125,7 @@ function action_addProduct_(payload, ctx) {
   if (!canManageProducts_(ctx)) return forbidden_();
   var c = resolveCustomerId_(payload, ctx);
   if (c.error) return c.error;
-  var p = payload.product || {};
+  var p = normalizeProductPayload_(payload.product || {});
   if (!p.name) return badRequest_('product.name is required');
   if (!p.senderAddressId && !p.senderName) return badRequest_('a sender address is required');
 
@@ -139,7 +152,7 @@ function action_updateProduct_(payload, ctx) {
   if (c.error) return c.error;
   var productId = payload.productId;
   if (!productId) return badRequest_('productId required');
-  var p = payload.product || {};
+  var p = normalizeProductPayload_(payload.product || {});
 
   var sheet = ensureColumns_(getSheetOrThrow_(getCustomerSpreadsheet_(c.id), SHEETS.PRODUCTS), productColumns_());
   var data = readObjects_(sheet);
@@ -333,6 +346,8 @@ function action_listOpenOrders_(payload, ctx) {
         trackingId: String(r.tracking_id),
         productId: r.product_id,
         extraProductIds: parseIdList_(r.extra_product_ids),
+        variant: String(r.variant || ''),
+        extraVariants: parseIdList_(r.extra_variants),
         receiverName: r.receiver_name,
         receiverPhone: String(r.receiver_phone),
         receiverPincode: String(r.receiver_pincode),
@@ -425,7 +440,7 @@ function action_updateOrder_(payload, ctx) {
       receiverName: 'receiver_name', receiverPhone: 'receiver_phone',
       receiverPincode: 'receiver_pincode', receiverLine1: 'receiver_line1',
       receiverLine2: 'receiver_line2', receiverState: 'receiver_state',
-      productId: 'product_id',
+      productId: 'product_id', variant: 'variant',
     };
     var changed = 0;
     Object.keys(MAP).forEach(function (k) {

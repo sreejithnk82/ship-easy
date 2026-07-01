@@ -28,7 +28,7 @@ export const ScanBook = () => {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<OpenOrder | null>(null);
-  const [editForm, setEditForm] = useState({ name: '', phone: '', pincode: '', line1: '', line2: '', state: '', productId: '' });
+  const [editForm, setEditForm] = useState({ name: '', phone: '', pincode: '', line1: '', line2: '', state: '', productId: '', variant: '' });
   const [mode, setMode] = useState<'type' | 'camera'>(() => {
     try { return localStorage.getItem('shipeasy.scanMode') === 'camera' ? 'camera' : 'type'; } catch { return 'type'; }
   });
@@ -161,6 +161,7 @@ export const ScanBook = () => {
     setEditForm({
       name: o.receiverName, phone: o.receiverPhone, pincode: o.receiverPincode,
       line1: o.receiverLine1, line2: o.receiverLine2, state: o.receiverState, productId: o.productId,
+      variant: o.variant || '',
     });
   };
 
@@ -176,7 +177,7 @@ export const ScanBook = () => {
       receiverName: e.name.trim(), receiverPhone: e.phone.trim(),
       receiverPincode: e.pincode.replace(/\D/g, ''), receiverLine1: e.line1.trim(),
       receiverLine2: e.line2.trim(), receiverState: (e.state || stateFromPincode(e.pincode)).trim(),
-      productId: e.productId,
+      productId: e.productId, variant: e.variant || '',
     };
     try {
       await api.updateOrder(customerId, { trackingId: editing.trackingId }, fields);
@@ -236,6 +237,7 @@ export const ScanBook = () => {
 
     const rows: DtdcOrder[] = scanned.map((s) => ({
       trackingId: s.trackingId, productId: s.productId, extraProductIds: s.extraProductIds || [],
+      variant: s.variant || '', extraVariants: s.extraVariants || [],
       receiverName: s.receiverName, receiverPhone: s.receiverPhone,
       receiverPincode: s.receiverPincode, receiverLine1: s.receiverLine1,
       receiverLine2: s.receiverLine2, receiverState: s.receiverState,
@@ -268,6 +270,7 @@ export const ScanBook = () => {
   }
 
   const stateCounts = countBy(scanned, (s) => s.receiverState || '—');
+  const productById = new Map(products.map((p) => [p.productId, p]));
 
   return (
     <div className="fade-in" style={{ paddingBottom: '4rem' }}>
@@ -351,6 +354,12 @@ export const ScanBook = () => {
                 </div>
                 <p style={{ margin: '0.25rem 0', fontFamily: 'monospace', fontSize: '0.85rem' }}>{s.trackingId}</p>
                 <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{s.receiverPincode} · {s.receiverState}</p>
+                {(productById.get(s.productId)?.name || s.variant) && (
+                  <p style={{ margin: '0.25rem 0 0', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                    {productById.get(s.productId)?.name || 'Product'}{s.variant ? ` · ${s.variant}` : ''}
+                    {s.extraProductIds && s.extraProductIds.length > 0 ? ` +${s.extraProductIds.length}` : ''}
+                  </p>
+                )}
                 {s.exportedAt && <span className="badge badge-processing" style={{ marginTop: '0.4rem', display: 'inline-block' }}>already exported</span>}
               </div>
             ))}
@@ -374,10 +383,19 @@ export const ScanBook = () => {
             <EF label="Address Line 2 *" v={editForm.line2} on={(v) => setEditForm({ ...editForm, line2: v })} />
             <div className="input-group">
               <label className="input-label">Product</label>
-              <select className="input-field" value={editForm.productId} onChange={(e) => setEditForm({ ...editForm, productId: e.target.value })}>
+              <select className="input-field" value={editForm.productId} onChange={(e) => setEditForm({ ...editForm, productId: e.target.value, variant: '' })}>
                 {products.map((p) => <option key={p.productId} value={p.productId}>{p.name}</option>)}
               </select>
             </div>
+            {(productById.get(editForm.productId)?.variants || []).length > 0 && (
+              <div className="input-group">
+                <label className="input-label">Variant</label>
+                <select className="input-field" value={editForm.variant} onChange={(e) => setEditForm({ ...editForm, variant: e.target.value })}>
+                  <option value="">-- Choose variant --</option>
+                  {(productById.get(editForm.productId)?.variants || []).map((v) => <option key={v} value={v}>{v}</option>)}
+                </select>
+              </div>
+            )}
             <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem' }}>
               <button className="btn btn-outline" style={{ flex: 1 }} onClick={() => setEditing(null)}>Cancel</button>
               <button className="btn btn-primary" style={{ flex: 1 }} onClick={saveEdit} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>

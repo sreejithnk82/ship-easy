@@ -18,7 +18,7 @@ import { LabelTile } from '../components/LabelTile';
 import { AddressSorter, SortedFields } from '../components/AddressSorter';
 import { useToast, useConfirm } from '../components/feedback';
 
-const EMPTY = { name: '', phone: '', pincode: '', line1: '', line2: '', state: '', productId: '', extraProductIds: [] as string[] };
+const EMPTY = { name: '', phone: '', pincode: '', line1: '', line2: '', state: '', productId: '', variant: '', extraProductIds: [] as string[], extraVariants: [] as string[] };
 const MAX_EXTRA = 4; // up to 5 products per parcel (1 primary + 4 extra)
 
 export const AddOrder = () => {
@@ -96,12 +96,22 @@ export const AddOrder = () => {
   };
 
   // Extra products (same parcel). Setting an existing slot to '' removes it.
+  // extraVariants is index-aligned with extraProductIds, so they move together.
   const setExtra = (i: number, val: string) => setF((prev) => {
     const ex = [...(prev.extraProductIds || [])];
-    if (val) ex[i] = val; else ex.splice(i, 1);
-    return { ...prev, extraProductIds: ex };
+    const ev = [...(prev.extraVariants || [])];
+    if (val) { ex[i] = val; ev[i] = ''; } // product changed → clear its variant
+    else { ex.splice(i, 1); ev.splice(i, 1); }
+    return { ...prev, extraProductIds: ex, extraVariants: ev };
   });
-  const addExtra = (val: string) => { if (val) setF((prev) => ({ ...prev, extraProductIds: [...(prev.extraProductIds || []), val] })); };
+  const addExtra = (val: string) => { if (val) setF((prev) => ({ ...prev, extraProductIds: [...(prev.extraProductIds || []), val], extraVariants: [...(prev.extraVariants || []), ''] })); };
+  const setExtraVariant = (i: number, val: string) => setF((prev) => {
+    const ev = [...(prev.extraVariants || [])];
+    ev[i] = val;
+    return { ...prev, extraVariants: ev };
+  });
+  // Variant labels a product offers (empty → no second choice needed).
+  const variantsOf = (id: string): string[] => productById.get(id)?.variants || [];
 
   // The drag-and-drop sorter fills the form, then the operator reviews and Adds.
   const onSorted = (s: SortedFields) => {
@@ -127,13 +137,25 @@ export const AddOrder = () => {
     if (!isValidPincode(ff.pincode)) { notify('Enter a valid 6-digit pincode.', 'error'); return; }
     if (!isServiceable(ff.pincode)) { notify(`Pincode ${ff.pincode.replace(/\D/g, '')} is not in the DTDC serviceable list. Check the pincode, or refresh the list if it was recently added.`, 'error'); return; }
     if (!ff.productId) { notify('Select a product.', 'error'); return; }
+    // A variant must be chosen for any product that defines variants.
+    if (variantsOf(ff.productId).length && !ff.variant) { notify('Select a variant for the product.', 'error'); return; }
+
+    // Pair extras with their variants and drop empty slots in lockstep.
+    const exPairs = (ff.extraProductIds || [])
+      .map((id, i) => ({ id, v: (ff.extraVariants || [])[i] || '' }))
+      .filter((p) => p.id);
+    for (const p of exPairs) {
+      if (variantsOf(p.id).length && !p.v) { notify(`Select a variant for ${productById.get(p.id)?.name || 'the added product'}.`, 'error'); return; }
+    }
 
     const existing = editId ? pending.find((p) => p.clientOrderId === editId) : null;
     const order: PendingOrder = {
       clientOrderId: editId || newClientOrderId(),
       customerId,
       productId: ff.productId,
-      extraProductIds: (ff.extraProductIds || []).filter(Boolean),
+      variant: ff.variant || '',
+      extraProductIds: exPairs.map((p) => p.id),
+      extraVariants: exPairs.map((p) => p.v),
       receiverName: ff.name.trim(),
       receiverPhone: ff.phone.trim(),
       receiverPincode: ff.pincode.replace(/\D/g, ''),
@@ -156,7 +178,9 @@ export const AddOrder = () => {
     setF({
       name: o.receiverName, phone: o.receiverPhone, pincode: o.receiverPincode,
       line1: o.receiverLine1, line2: o.receiverLine2, state: o.receiverState, productId: o.productId,
+      variant: o.variant || '',
       extraProductIds: o.extraProductIds || [],
+      extraVariants: o.extraVariants || [],
     });
     setAdding(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -203,6 +227,7 @@ export const AddOrder = () => {
     const key = getBatchKey();
     const orders: OrderInput[] = pending.map((p) => ({
       clientOrderId: p.clientOrderId, productId: p.productId, extraProductIds: p.extraProductIds || [],
+      variant: p.variant || '', extraVariants: p.extraVariants || [],
       receiverName: p.receiverName, receiverPhone: p.receiverPhone,
       receiverPincode: p.receiverPincode, receiverLine1: p.receiverLine1,
       receiverLine2: p.receiverLine2, receiverState: p.receiverState,
@@ -345,7 +370,7 @@ export const AddOrder = () => {
 
             <div className="input-group">
               <label className="input-label">Product *</label>
-              <select className="input-field" value={f.productId} onChange={(e) => setF({ ...f, productId: e.target.value })}
+              <select className="input-field" value={f.productId} onChange={(e) => setF({ ...f, productId: e.target.value, variant: '' })}
                 style={attempted && !f.productId ? { borderColor: 'var(--danger-color)' } : undefined}>
                 <option value="">-- Choose --</option>
                 {bookableSorted.map((p) => <option key={p.productId} value={p.productId}>{p.name} ({p.weightG}g)</option>)}
@@ -353,15 +378,37 @@ export const AddOrder = () => {
               {attempted && !f.productId && <div style={{ color: 'var(--danger-color)', fontSize: '0.75rem', marginTop: '0.25rem' }}>Select a product</div>}
             </div>
 
+            {/* Second step: choose the variant, only when the product defines any. */}
+            {f.productId && variantsOf(f.productId).length > 0 && (
+              <div className="input-group">
+                <label className="input-label">Variant *</label>
+                <select className="input-field" value={f.variant} onChange={(e) => setF({ ...f, variant: e.target.value })}
+                  style={attempted && !f.variant ? { borderColor: 'var(--danger-color)' } : undefined}>
+                  <option value="">-- Choose variant --</option>
+                  {variantsOf(f.productId).map((v) => <option key={v} value={v}>{v}</option>)}
+                </select>
+                {attempted && !f.variant && <div style={{ color: 'var(--danger-color)', fontSize: '0.75rem', marginTop: '0.25rem' }}>Select a variant</div>}
+              </div>
+            )}
+
             {/* Additional products in the SAME parcel (one label). Weight is summed; box = largest item. */}
             {f.productId && (
               <div className="input-group">
                 <label className="input-label">Additional products (optional — same parcel)</label>
                 {(f.extraProductIds || []).map((id, i) => (
-                  <select key={i} className="input-field" style={{ marginBottom: '0.5rem' }} value={id} onChange={(e) => setExtra(i, e.target.value)}>
-                    <option value="">— remove —</option>
-                    {bookableSorted.map((p) => <option key={p.productId} value={p.productId}>{p.name} ({p.weightG}g)</option>)}
-                  </select>
+                  <div key={i} style={{ marginBottom: '0.5rem' }}>
+                    <select className="input-field" value={id} onChange={(e) => setExtra(i, e.target.value)}>
+                      <option value="">— remove —</option>
+                      {bookableSorted.map((p) => <option key={p.productId} value={p.productId}>{p.name} ({p.weightG}g)</option>)}
+                    </select>
+                    {variantsOf(id).length > 0 && (
+                      <select className="input-field" value={(f.extraVariants || [])[i] || ''} onChange={(e) => setExtraVariant(i, e.target.value)}
+                        style={{ marginTop: '0.35rem', ...(attempted && !((f.extraVariants || [])[i]) ? { borderColor: 'var(--danger-color)' } : {}) }}>
+                        <option value="">-- Choose variant --</option>
+                        {variantsOf(id).map((v) => <option key={v} value={v}>{v}</option>)}
+                      </select>
+                    )}
+                  </div>
                 ))}
                 {(f.extraProductIds || []).length < MAX_EXTRA && (
                   <select className="input-field" value="" onChange={(e) => addExtra(e.target.value)}>
@@ -411,10 +458,16 @@ export const AddOrder = () => {
               <p style={{ margin: '0.25rem 0', fontSize: '0.9rem' }}>{o.receiverPhone} · {o.receiverPincode} · {o.receiverState}</p>
               <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{o.receiverLine1}, {o.receiverLine2}</p>
               <div style={{ marginTop: '0.5rem' }}>
-                <span className="badge badge-primary" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
-                  <Package size={13} /> {productById.get(o.productId)?.name || 'Unknown product'}
-                  {o.extraProductIds && o.extraProductIds.length > 0 && ` +${o.extraProductIds.length} more`}
-                </span>
+                {(() => {
+                  const label = (id: string, v?: string) => (productById.get(id)?.name || 'Unknown product') + (v ? ` · ${v}` : '');
+                  const items = [label(o.productId, o.variant), ...(o.extraProductIds || []).map((id, i) => label(id, (o.extraVariants || [])[i]))];
+                  return (
+                    <span className="badge badge-primary" title={items.join('\n')} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
+                      <Package size={13} /> {label(o.productId, o.variant)}
+                      {o.extraProductIds && o.extraProductIds.length > 0 && ` +${o.extraProductIds.length} more`}
+                    </span>
+                  );
+                })()}
               </div>
               {o.sourceText && (
                 <details style={{ marginTop: '0.6rem' }}>
@@ -475,13 +528,19 @@ export const AddOrder = () => {
       {sorting && <AddressSorter rawInitial={raw} onApply={onSorted} onClose={() => setSorting(false)} />}
 
       {showCounts && (() => {
+        // Count per product AND variant, so pickers see "Perfume · 100ml: 5".
         const counts = new Map<string, number>();
         let totalItems = 0;
-        pending.forEach((o) => [o.productId, ...(o.extraProductIds || [])].filter(Boolean).forEach((id) => {
-          counts.set(id, (counts.get(id) || 0) + 1); totalItems++;
-        }));
+        pending.forEach((o) => {
+          const items = [{ id: o.productId, v: o.variant || '' }, ...(o.extraProductIds || []).map((id, i) => ({ id, v: (o.extraVariants || [])[i] || '' }))];
+          items.filter((it) => it.id).forEach((it) => {
+            const name = productById.get(it.id)?.name || 'Unknown product';
+            const key = it.v ? `${name} · ${it.v}` : name;
+            counts.set(key, (counts.get(key) || 0) + 1); totalItems++;
+          });
+        });
         const rows = [...counts.entries()]
-          .map(([id, n]) => ({ name: productById.get(id)?.name || 'Unknown product', n }))
+          .map(([name, n]) => ({ name, n }))
           .sort((a, b) => b.n - a.n);
         return (
           <div onClick={() => setShowCounts(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 3000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1.25rem' }}>

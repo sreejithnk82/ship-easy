@@ -137,6 +137,8 @@ function action_listOrders_(payload, ctx) {
       trackingId: String(r.tracking_id || ''),
       productId: String(r.product_id || ''),
       extraProductIds: parseIdList_(r.extra_product_ids),
+      variant: String(r.variant || ''),
+      extraVariants: parseIdList_(r.extra_variants),
       receiverName: r.receiver_name || '',
       receiverPhone: String(r.receiver_phone || ''),
       receiverPincode: String(r.receiver_pincode || ''),

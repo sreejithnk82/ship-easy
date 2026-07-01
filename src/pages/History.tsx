@@ -12,7 +12,7 @@ import { whatsappShareLink, shipmentMessage } from '../lib/share';
 import { useToast } from '../components/feedback';
 
 type UiLabel = {
-  trackingId: string; productId: string;
+  trackingId: string; productId: string; variant?: string;
   receiverName: string; receiverPhone: string; receiverPincode: string;
   receiverLine1: string; receiverLine2: string; receiverState?: string;
   status?: string; exportedAt?: string; shippedAt?: string;
@@ -70,7 +70,7 @@ export const History = () => {
       let b = byBatch.get(id);
       if (!b) { b = { batchId: id, createdAt: Date.parse(o.createdAt) || 0, labels: [], products }; byBatch.set(id, b); }
       b.labels.push({
-        trackingId: o.trackingId, productId: o.productId, status: o.status,
+        trackingId: o.trackingId, productId: o.productId, variant: o.variant, status: o.status,
         receiverName: o.receiverName, receiverPhone: o.receiverPhone, receiverPincode: o.receiverPincode,
         receiverLine1: o.receiverLine1, receiverLine2: o.receiverLine2, receiverState: o.receiverState,
         exportedAt: o.exportedAt, shippedAt: o.shippedAt,
@@ -192,7 +192,7 @@ const LabelCard = ({ l, productName }: { l: UiLabel; productName: string }) => {
         <div style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: '1.15rem', textDecoration: l.status === 'void' ? 'line-through' : 'none' }}>{l.trackingId}</div>
       </div>
 
-      <Row label="Product" value={productName} />
+      <Row label="Product" value={productName + (l.variant ? ` · ${l.variant}` : '')} />
       <Row label="Phone" value={l.receiverPhone} />
       <Row label="Address" value={[l.receiverLine1, l.receiverLine2].filter(Boolean).join(', ')} />
       <Row label="Pincode / State" value={[l.receiverPincode, l.receiverState].filter(Boolean).join(' · ')} />

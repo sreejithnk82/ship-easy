@@ -12,8 +12,13 @@ const EMPTY = {
   name: '', hubCustomerCode: '', senderAddressId: '',
   content: 'OTHERS', description: '', declaredValue: '',
   weightG: '', lengthCm: '', widthCm: '', heightCm: '',
+  variants: '', // sub-type labels, comma/newline separated (e.g. "Red, Blue, 100ml")
 };
 type FormState = typeof EMPTY;
+
+// Split the free-text variants box into clean labels (comma or newline separated).
+const parseVariants = (s: string): string[] =>
+  s.split(/[,\n]/).map((v) => v.trim()).filter(Boolean);
 
 // Sentinel value for the "+ Add new address…" option in the sender dropdown.
 const ADD_NEW = '__add_new__';
@@ -89,6 +94,7 @@ export const Products = () => {
       name: p.name, hubCustomerCode: p.hubCustomerCode, senderAddressId: p.senderAddressId || '',
       content: p.content || 'OTHERS', description: p.description, declaredValue: String(p.declaredValue),
       weightG: String(p.weightG), lengthCm: String(p.lengthCm), widthCm: String(p.widthCm), heightCm: String(p.heightCm),
+      variants: (p.variants || []).join(', '),
     });
     setShowForm(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -117,6 +123,7 @@ export const Products = () => {
       declaredValue: Number(form.declaredValue) || 0,
       weightG: Number(form.weightG), lengthCm: Number(form.lengthCm) || 0,
       widthCm: Number(form.widthCm) || 0, heightCm: Number(form.heightCm) || 0,
+      variants: parseVariants(form.variants),
     };
     try {
       if (editingId) await api.updateProduct(editingId, payload, customerId);
@@ -207,6 +214,15 @@ export const Products = () => {
             <F label="Height (cm)" type="number" v={form.heightCm} on={set('heightCm')} />
           </div>
 
+          <div className="input-group" style={{ margin: '0.75rem 0 0' }}>
+            <label className="input-label">Variants / sub-types (optional)</label>
+            <input className="input-field" value={form.variants} placeholder="e.g. Red, Blue, 100ml — comma separated"
+              onChange={(e) => set('variants')(e.target.value)} />
+            <p style={{ margin: '0.35rem 0 0', fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+              Same weight &amp; size for all — the chosen label is added to the order and DTDC description.
+            </p>
+          </div>
+
           {addresses.length === 0 && (
             <p style={{ marginTop: '0.75rem', fontSize: '0.85rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
               <MapPin size={15} /> No sender addresses yet — pick "+ Add new address…" above to create one.
@@ -241,6 +257,11 @@ export const Products = () => {
                 <span className="badge badge-gray">{p.content}</span>
                 {(p.lengthCm || p.widthCm || p.heightCm) ? <span className="badge badge-gray">{p.lengthCm}×{p.widthCm}×{p.heightCm}cm</span> : null}
               </div>
+              {p.variants && p.variants.length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', marginTop: '0.6rem' }}>
+                  {p.variants.map((v) => <span key={v} className="badge badge-gray" style={{ opacity: 0.85 }}>{v}</span>)}
+                </div>
+              )}
               {canVerify && p.status === 'pending' && (
                 <button className="btn btn-primary" onClick={() => verify(p)} style={{ marginTop: '1rem', width: '100%' }}>
                   <BadgeCheck size={16} /> Verify product

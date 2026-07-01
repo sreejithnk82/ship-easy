@@ -81,12 +81,15 @@ export interface Product {
   description: string;
   declaredValue: number;
   weightG: number; lengthCm: number; widthCm: number; heightCm: number;
+  variants?: string[];    // optional sub-type labels (color / material / ml …); same shipping profile
   status?: string;        // 'verified' | 'pending' — only verified can be booked
   createdBy?: string; verifiedBy?: string; verifiedAt?: string;
 }
 export interface OrderInput {
   clientOrderId: string; productId: string;
   extraProductIds?: string[]; // up to 4 more products in the SAME parcel (one label)
+  variant?: string;           // chosen sub-type label for the primary product
+  extraVariants?: string[];   // chosen labels, index-aligned with extraProductIds
   receiverName: string; receiverPhone: string; receiverPincode: string;
   receiverLine1: string; receiverLine2: string; receiverState: string;
 }
@@ -96,6 +99,7 @@ export interface Assignment { clientOrderId: string; trackingId: string; }
 // A customer's own order with live lifecycle status (server-backed history).
 export interface OrderRow {
   orderId: string; batchId: string; trackingId: string; productId: string;
+  variant?: string; extraVariants?: string[];
   receiverName: string; receiverPhone: string; receiverPincode: string;
   receiverLine1: string; receiverLine2: string; receiverState: string;
   status: 'labeled' | 'shipped' | 'void' | string;
