@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Save, AlertCircle, Package, Printer, Trash2, Pencil, WifiOff, LayoutGrid, X, ListOrdered } from 'lucide-react';
+import { Save, AlertCircle, Package, Printer, Trash2, Pencil, WifiOff, LayoutGrid, X, ListOrdered, Search } from 'lucide-react';
 import { api, Product, OrderInput } from '../lib/api';
 import { ApiError } from '../lib/api';
 import { useProfile } from '../lib/profile';
@@ -11,10 +11,8 @@ import {
   addPending, listPending, deletePending, clearPending,
   newClientOrderId, PendingOrder, saveBatch,
 } from '../lib/outbox';
-import { downloadLabels } from '../lib/labels';
-import { getLabelFormat, setLabelFormat, LabelFormat } from '../lib/labelFormat';
-import { LabelFormatPicker } from '../components/LabelFormatPicker';
-import { LabelTile } from '../components/LabelTile';
+import type { LabelOrder } from '../lib/labelModel';
+import { LabelOutputModal } from '../components/LabelOutputModal';
 import { AddressSorter, SortedFields } from '../components/AddressSorter';
 import { useToast, useConfirm } from '../components/feedback';
 
@@ -45,10 +43,9 @@ export const AddOrder = () => {
   const [generating, setGenerating] = useState(false);
   const [loadingProducts, setLoadingProducts] = useState(true);
   const [loadingBalance, setLoadingBalance] = useState(true);
-  const [fmt, setFmt] = useState<LabelFormat>(getLabelFormat());
-  const [showPreview, setShowPreview] = useState(false);
-
-  const changeFmt = (f: LabelFormat) => { setFmt(f); setLabelFormat(f); };
+  const [query, setQuery] = useState(''); // client-side search over active orders
+  // The just-generated batch, shown in the size/Download/Print modal.
+  const [outputBatch, setOutputBatch] = useState<{ labels: LabelOrder[]; products: Product[] } | null>(null);
 
   useEffect(() => { if (customerId) { loadProducts(); refresh(); refreshBalance(); refreshServiceableIfStale(); } }, [customerId]);
 
@@ -245,20 +242,22 @@ export const AddOrder = () => {
           receiverLine2: p.receiverLine2, receiverState: p.receiverState,
         };
       });
-      downloadLabels(labelOrders, products, fmt);
+      const snapshot = products;
       await saveBatch({
         batchId: res.batchId,
         customerId,
         createdAt: Date.now(),
         count: labelOrders.length,
         labels: labelOrders,
-        products, // snapshot, so re-printing works even if a product later changes
+        products: snapshot, // snapshot, so re-printing works even if a product later changes
       });
       await clearPending(pending.map((p) => p.clientOrderId));
       localStorage.removeItem(keyName);
       refresh();
       refreshBalance();
-      notify(`Generated ${res.assignments.length} labels (batch ${res.batchId.slice(0, 8)}). See them under Label History.`, 'success');
+      // Choose size + Download/Print at output time (also always available in Label History).
+      setOutputBatch({ labels: labelOrders, products: snapshot });
+      notify(`Generated ${res.assignments.length} labels (batch ${res.batchId.slice(0, 8)}). Choose a size to download or print — also saved under Label History.`, 'success');
     } catch (e) {
       if (e instanceof ApiError && e.code === 'INSUFFICIENT_IDS') {
         notify(`Not enough tracking IDs left (only ${e.available} available). Ask admin to top up.`, 'error');
@@ -271,6 +270,18 @@ export const AddOrder = () => {
   };
 
   const productById = new Map(products.map((p) => [p.productId, p]));
+
+  // Client-side search over the loaded active orders (name / phone / pincode /
+  // state / product). Generate still acts on ALL pending — this only locates.
+  const q = query.trim().toLowerCase();
+  const orderMatches = (o: PendingOrder) => {
+    if (!q) return true;
+    const prods = [o.productId, ...(o.extraProductIds || [])].map((id) => productById.get(id)?.name || '').join(' ');
+    return [o.receiverName, o.receiverPhone, o.receiverPincode, o.receiverState, prods]
+      .some((v) => String(v || '').toLowerCase().includes(q));
+  };
+  const visiblePending = q ? pending.filter(orderMatches) : pending;
+
   // Only verified products can be booked (members add products as "pending").
   const bookable = products.filter((p) => p.status !== 'pending');
   // Rank the dropdown: products matching the sorter's leftover hints float to the
@@ -430,7 +441,7 @@ export const AddOrder = () => {
       )}
 
       <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-secondary)', margin: '0 0 1rem' }}>
-        Active Orders ({pending.length})
+        Active Orders ({q ? `${visiblePending.length} of ${pending.length}` : pending.length})
         <span title="Saved locally; syncs on Generate Labels" style={{ display: 'inline-flex' }}><WifiOff size={14} /></span>
         {pending.length > 0 && (
           <button className="btn btn-outline" onClick={() => setShowCounts(true)} style={{ width: 'auto', marginLeft: 'auto', padding: '0.3rem 0.7rem', fontSize: '0.8rem' }}>
@@ -439,14 +450,27 @@ export const AddOrder = () => {
         )}
       </h3>
 
+      {pending.length > 0 && (
+        <div className="input-group" style={{ position: 'relative', margin: '0 0 1rem', maxWidth: 420 }}>
+          <Search size={16} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)' }} />
+          <input className="input-field" style={{ paddingLeft: '2rem' }} placeholder="Search name, phone, pincode, product…"
+            value={query} onChange={(e) => setQuery(e.target.value)} />
+          {query && <button onClick={() => setQuery('')} title="Clear" style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)' }}><X size={16} /></button>}
+        </div>
+      )}
+
       {pending.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--text-secondary)' }}>
           <Package size={48} style={{ opacity: 0.2, margin: '0 auto 1rem' }} />
           <p>No active orders yet.</p>
         </div>
+      ) : visiblePending.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '2rem 1rem', color: 'var(--text-secondary)' }}>
+          <p>No active orders match "{query}".</p>
+        </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem' }}>
-          {pending.map((o) => (
+          {visiblePending.map((o) => (
             <div key={o.clientOrderId} className="glass-card" style={{ padding: '1rem', borderLeft: '4px solid var(--primary-color)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <h4 style={{ margin: 0 }}>{o.receiverName}</h4>
@@ -480,35 +504,6 @@ export const AddOrder = () => {
         </div>
       )}
 
-      {pending.length > 0 && (
-        <div className="glass-card" style={{ marginTop: '1.5rem' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: '1rem', flexWrap: 'wrap' }}>
-            <LabelFormatPicker value={fmt} onChange={changeFmt} />
-            <button className="btn btn-outline" onClick={() => setShowPreview((s) => !s)} style={{ width: 'auto' }}>
-              {showPreview ? 'Hide preview' : 'Preview labels'}
-            </button>
-          </div>
-          {showPreview && (
-            <>
-              <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', margin: '0.75rem 0 0.5rem' }}>
-                Layout preview — tracking IDs are assigned when you generate.
-              </p>
-              <div style={{ display: 'flex', gap: '1rem', overflowX: 'auto', paddingBottom: '0.5rem' }}>
-                {pending.slice(0, 6).map((o) => (
-                  <LabelTile
-                    key={o.clientOrderId}
-                    scale={0.5}
-                    order={{ trackingId: 'SAMPLE0000', productId: o.productId, receiverName: o.receiverName, receiverPhone: o.receiverPhone, receiverPincode: o.receiverPincode, receiverLine1: o.receiverLine1, receiverLine2: o.receiverLine2, receiverState: o.receiverState }}
-                    product={productById.get(o.productId)}
-                  />
-                ))}
-              </div>
-              {pending.length > 6 && <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>+{pending.length - 6} more</p>}
-            </>
-          )}
-        </div>
-      )}
-
       {pending.length > 0 && (() => {
         const notEnough = balance !== null && balance.remaining < pending.length;
         return (
@@ -526,6 +521,15 @@ export const AddOrder = () => {
       })()}
 
       {sorting && <AddressSorter rawInitial={raw} onApply={onSorted} onClose={() => setSorting(false)} />}
+
+      {outputBatch && (
+        <LabelOutputModal
+          labels={outputBatch.labels}
+          products={outputBatch.products}
+          title="Download labels"
+          onClose={() => setOutputBatch(null)}
+        />
+      )}
 
       {showCounts && (() => {
         // Count per product AND variant, so pickers see "Perfume · 100ml: 5".

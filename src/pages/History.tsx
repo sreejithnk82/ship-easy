@@ -1,12 +1,10 @@
 import { useState, useEffect } from 'react';
-import { History as HistoryIcon, Download, ChevronDown, ChevronRight, Package, WifiOff, MessageCircle, CalendarDays, Copy } from 'lucide-react';
+import { History as HistoryIcon, Download, ChevronDown, ChevronRight, Package, WifiOff, MessageCircle, CalendarDays, Copy, Search, X, Printer } from 'lucide-react';
 import { api, OrderRow, Product } from '../lib/api';
 import { useProfile } from '../lib/profile';
 import { useActiveCustomer } from '../lib/activeCustomer';
 import { listBatches, SavedBatch } from '../lib/outbox';
-import { downloadLabels } from '../lib/labels';
-import { getLabelFormat, setLabelFormat, LabelFormat } from '../lib/labelFormat';
-import { LabelFormatPicker } from '../components/LabelFormatPicker';
+import { LabelOutputModal } from '../components/LabelOutputModal';
 import { istDayKey, istDateLabel, istTimeLabel, istDateTimeLabel, todayIstDayKey } from '../lib/datetime';
 import { whatsappShareLink, shipmentMessage } from '../lib/share';
 import { useToast } from '../components/feedback';
@@ -33,9 +31,8 @@ export const History = () => {
   const [loading, setLoading] = useState(true);
   const [day, setDay] = useState<string>(todayIstDayKey());
   const [openBatch, setOpenBatch] = useState<string | null>(null);
-  const [fmt, setFmt] = useState<LabelFormat>(getLabelFormat());
-
-  const changeFmt = (f: LabelFormat) => { setFmt(f); setLabelFormat(f); };
+  const [q, setQ] = useState(''); // client-side search within the selected day
+  const [output, setOutput] = useState<{ labels: UiLabel[]; products: Product[]; title: string; filename?: string } | null>(null);
 
   useEffect(() => { if (customerId) load(); else setLoading(false); }, [customerId]);
 
@@ -82,12 +79,23 @@ export const History = () => {
   }
 
   // Only the chosen IST day, newest first.
-  const batches = allBatches
+  const dayBatches = allBatches
     .filter((b) => istDayKey(b.createdAt) === day)
     .sort((a, b) => b.createdAt - a.createdAt);
 
-  const regenerate = (b: UiBatch) =>
-    downloadLabels(b.labels, b.products, fmt, `labels_${b.batchId.slice(0, 8)}.pdf`);
+  // Client-side search WITHIN the selected day (name/phone/pincode/state/tracking/product).
+  const query = q.trim().toLowerCase();
+  const labelMatches = (l: UiLabel) =>
+    !query || [l.receiverName, l.receiverPhone, l.receiverPincode, l.receiverState, l.trackingId, productName(l.productId)]
+      .some((v) => String(v || '').toLowerCase().includes(query));
+  const batches = query
+    ? dayBatches.map((b) => ({ ...b, labels: b.labels.filter(labelMatches) })).filter((b) => b.labels.length > 0)
+    : dayBatches;
+
+  const openBatchOutput = (b: UiBatch) =>
+    setOutput({ labels: b.labels, products: b.products, title: `${b.labels.length} label${b.labels.length === 1 ? '' : 's'} · #${b.batchId.slice(0, 8)}`, filename: `labels_${b.batchId.slice(0, 8)}.pdf` });
+  const openLabelOutput = (b: UiBatch, l: UiLabel) =>
+    setOutput({ labels: [l], products: b.products, title: `Label ${l.trackingId}`, filename: `label_${l.trackingId}.pdf` });
 
   if (!customerId) {
     return <div className="fade-in"><h1 className="page-title">Label History</h1>
@@ -117,9 +125,11 @@ export const History = () => {
         </span>
       </div>
 
-      <div className="glass-card" style={{ marginBottom: '1.5rem' }}>
-        <p style={{ margin: '0 0 0.6rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Label size for downloads</p>
-        <LabelFormatPicker value={fmt} onChange={changeFmt} />
+      <div className="input-group" style={{ position: 'relative', margin: '0 0 1.5rem', maxWidth: 420 }}>
+        <Search size={16} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)' }} />
+        <input className="input-field" style={{ paddingLeft: '2rem' }} placeholder="Search this day — name, phone, pincode, tracking…"
+          value={q} onChange={(e) => setQ(e.target.value)} />
+        {q && <button onClick={() => setQ('')} title="Clear" style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)' }}><X size={16} /></button>}
       </div>
 
       {loading ? (
@@ -127,12 +137,12 @@ export const History = () => {
       ) : batches.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--text-secondary)' }}>
           <Package size={48} style={{ opacity: 0.2, margin: '0 auto 1rem' }} />
-          <p>No labels generated on {istDateLabel(dayAsIst(day))}.</p>
+          <p>{query ? `No labels match "${q}" on ` : 'No labels generated on '}{istDateLabel(dayAsIst(day))}.</p>
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
           {batches.map((b) => {
-            const expanded = openBatch === b.batchId;
+            const expanded = openBatch === b.batchId || !!query;
             const n = b.labels.length;
             const shipped = b.labels.filter((l) => l.status === 'shipped').length;
             const voided = b.labels.filter((l) => l.status === 'void').length;
@@ -146,14 +156,14 @@ export const History = () => {
                     {shipped > 0 && <span className="badge badge-completed">{shipped} shipped</span>}
                     {voided > 0 && <span className="badge badge-gray">{voided} void</span>}
                   </button>
-                  <button className="btn btn-outline" onClick={() => regenerate(b)} style={{ width: 'auto', padding: '0.4rem 0.75rem', fontSize: '0.85rem' }}>
+                  <button className="btn btn-outline" onClick={() => openBatchOutput(b)} style={{ width: 'auto', padding: '0.4rem 0.75rem', fontSize: '0.85rem' }}>
                     <Download size={15} /> Labels
                   </button>
                 </div>
 
                 {expanded && (
                   <div style={{ marginTop: '1rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1rem' }}>
-                    {b.labels.map((l) => <LabelCard key={l.trackingId} l={l} productName={productName(l.productId)} />)}
+                    {b.labels.map((l) => <LabelCard key={l.trackingId} l={l} productName={productName(l.productId)} onOutput={() => openLabelOutput(b, l)} />)}
                   </div>
                 )}
               </div>
@@ -161,11 +171,21 @@ export const History = () => {
           })}
         </div>
       )}
+
+      {output && (
+        <LabelOutputModal
+          labels={output.labels}
+          products={output.products}
+          title={output.title}
+          filename={output.filename}
+          onClose={() => setOutput(null)}
+        />
+      )}
     </div>
   );
 };
 
-const LabelCard = ({ l, productName }: { l: UiLabel; productName: string }) => {
+const LabelCard = ({ l, productName, onOutput }: { l: UiLabel; productName: string; onOutput: () => void }) => {
   const notify = useToast();
   // The share message announces the order as Shipped, so only offer it once shipped.
   const isShipped = l.status === 'shipped';
@@ -184,7 +204,12 @@ const LabelCard = ({ l, productName }: { l: UiLabel; productName: string }) => {
     <div className="glass-card" style={{ padding: '1.1rem', borderLeft: `4px solid ${l.status === 'void' ? 'var(--text-secondary)' : 'var(--primary-color)'}` }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem' }}>
         <h3 style={{ margin: 0, fontSize: '1.1rem' }}>{l.receiverName}</h3>
-        {l.status && <span className={`badge ${statusClass}`} style={{ textTransform: 'capitalize' }}>{l.status}</span>}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+          {l.status && <span className={`badge ${statusClass}`} style={{ textTransform: 'capitalize' }}>{l.status}</span>}
+          <button onClick={onOutput} title="Download or print this label" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--primary-color)', display: 'inline-flex', padding: '0.15rem' }}>
+            <Printer size={16} />
+          </button>
+        </div>
       </div>
 
       <div style={{ margin: '0.75rem 0', padding: '0.6rem 0.75rem', background: 'rgba(99,102,241,0.07)', borderRadius: 'var(--radius-md)' }}>

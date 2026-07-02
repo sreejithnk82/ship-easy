@@ -2,9 +2,12 @@ import { useMemo } from 'react';
 import JsBarcode from 'jsbarcode';
 import type { Product } from '../lib/api';
 import { buildLabelFields, LabelOrder } from '../lib/labelModel';
+import { PAPER_PT, GRID, LabelFormat } from '../lib/labelFormat';
+import { computeLabelLayout, LabelPrimitive } from '../lib/labelLayout';
 
-// Fixed-layout on-screen preview of the DTDC label. Mirrors drawLabel() in
-// labels.ts (reference 288×432) so what you see ≈ the PDF.
+// On-screen preview of a label. Renders the SAME primitives as the PDF
+// (computeLabelLayout), for the chosen format's single-cell box — so what you
+// see matches the print. Points are used as px; the `scale` prop shrinks it.
 
 function barcode(value: string): string {
   try {
@@ -16,51 +19,56 @@ function barcode(value: string): string {
   }
 }
 
-const W = 288;
-const H = 432;
+const DEFAULT_FMT: LabelFormat = { paper: '4x6', perPage: 1 };
 
-const Abs = ({ l, t, w, size, bold, italic, color, align, children }: {
-  l: number; t: number; w?: number; size: number; bold?: boolean; italic?: boolean; color?: string; align?: 'left' | 'center' | 'right'; children: React.ReactNode;
-}) => (
-  <div style={{ position: 'absolute', left: l, top: t, width: w, fontSize: size, lineHeight: 1.2, fontWeight: bold ? 700 : 400, fontStyle: italic ? 'italic' : 'normal', color, textAlign: align, whiteSpace: w ? 'pre-line' : 'nowrap' }}>
-    {children}
-  </div>
-);
+// One primitive → an absolutely-positioned element (mirrors renderPrimitives in labels.ts).
+const Prim = ({ p, bc }: { p: LabelPrimitive; bc: string }) => {
+  if (p.kind === 'rect') {
+    return <div style={{ position: 'absolute', left: p.x, top: p.y, width: p.w, height: p.h, border: `${p.lineW}px solid #000`, boxSizing: 'border-box' }} />;
+  }
+  if (p.kind === 'line') {
+    const vertical = p.x1 === p.x2;
+    return <div style={{ position: 'absolute', left: p.x1, top: p.y1, width: vertical ? 0 : p.x2 - p.x1, height: vertical ? p.y2 - p.y1 : 0, borderTop: vertical ? undefined : `${p.lineW}px solid #000`, borderLeft: vertical ? `${p.lineW}px solid #000` : undefined }} />;
+  }
+  if (p.kind === 'barcode') {
+    return bc ? <img src={bc} alt="" style={{ position: 'absolute', left: p.x, top: p.y, width: p.w, height: p.h }} /> : null;
+  }
+  // text: p.y is the top; center/right anchor at p.x via transform.
+  const style: React.CSSProperties = {
+    position: 'absolute', top: p.y, fontSize: p.size,
+    fontWeight: p.weight === 'normal' ? 400 : 700,
+    fontStyle: p.weight === 'bolditalic' ? 'italic' : 'normal',
+    color: p.color || '#000', textAlign: p.align,
+    lineHeight: `${p.lineH ?? p.size * 1.15}px`,
+  };
+  if (p.maxW && p.align === 'left') {
+    style.left = p.x; style.width = p.maxW; style.whiteSpace = 'pre-line';
+  } else if (p.align === 'center') {
+    style.left = p.x; style.transform = 'translateX(-50%)'; style.whiteSpace = 'nowrap';
+  } else if (p.align === 'right') {
+    style.left = p.x; style.transform = 'translateX(-100%)'; style.whiteSpace = 'nowrap';
+  } else {
+    style.left = p.x; style.whiteSpace = 'nowrap';
+  }
+  return <div style={style}>{p.text}</div>;
+};
 
-export const LabelTile = ({ order, product, scale = 1 }: { order: LabelOrder; product?: Product; scale?: number }) => {
+export const LabelTile = ({ order, product, scale = 1, fmt }: { order: LabelOrder; product?: Product; scale?: number; fmt?: LabelFormat }) => {
+  const use = fmt ?? DEFAULT_FMT;
+  const [pw, ph] = PAPER_PT[use.paper] || PAPER_PT['4x6'];
+  const [cols, rows] = GRID[use.perPage] || [1, 1];
+  const cellW = pw / cols, cellH = ph / rows;
+  const margin = Math.min(cellW, cellH) * 0.03;
+  const boxW = cellW - 2 * margin, boxH = cellH - 2 * margin;
+
   const f = buildLabelFields(order, product);
+  const prims = useMemo(() => computeLabelLayout(boxW, boxH, f), [boxW, boxH, f.trackingId, f.toName, f.pincode]); // eslint-disable-line react-hooks/exhaustive-deps
   const bc = useMemo(() => barcode(f.trackingId), [f.trackingId]);
 
   return (
-    <div style={{ width: W * scale, height: H * scale, flex: '0 0 auto', overflow: 'hidden' }}>
-      <div style={{ width: W, height: H, transform: `scale(${scale})`, transformOrigin: 'top left', boxSizing: 'border-box', border: '1px solid #000', position: 'relative', background: '#fff', color: '#000', fontFamily: 'Helvetica, Arial, sans-serif' }}>
-        {/* Header */}
-        <Abs l={0} t={12} w={W - 14} size={30} bold italic color="#0d2d5f" align="right">DTDC</Abs>
-        <div style={{ position: 'absolute', left: 0, top: 52, width: W, borderTop: '1px solid #000' }} />
-
-        {/* From (compact) */}
-        <Abs l={14} t={60} size={11} bold>FROM:</Abs>
-        <Abs l={14} t={78} w={260} size={9.5} bold>{f.fromName}</Abs>
-        <Abs l={14} t={91} w={260} size={8.5}>{f.fromLines.join('\n')}</Abs>
-        <div style={{ position: 'absolute', left: 0, top: 132, width: W, borderTop: '1px solid #000' }} />
-
-        {/* Barcode + tracking id (large, centered) */}
-        {bc && <img src={bc} alt="" style={{ position: 'absolute', left: 24, top: 144, width: 240, height: 48 }} />}
-        <Abs l={0} t={192} w={W} size={15} bold align="center">{f.trackingId}</Abs>
-        <div style={{ position: 'absolute', left: 0, top: 214, width: W, borderTop: '1px solid #000' }} />
-
-        {/* To (the focus) */}
-        <Abs l={14} t={223} size={12} bold>TO:</Abs>
-        <Abs l={14} t={240} w={260} size={16} bold>{f.toName}</Abs>
-        <Abs l={14} t={266} w={260} size={12.5}>{f.toLines.join('\n')}</Abs>
-
-        {/* Big pincode */}
-        <Abs l={14} t={330} size={10} bold>PIN</Abs>
-        <Abs l={14} t={345} size={38} bold>{f.pincode}</Abs>
-        <div style={{ position: 'absolute', left: 0, top: 392, width: W, borderTop: '1px solid #000' }} />
-
-        {/* Product */}
-        <Abs l={14} t={400} w={260} size={11}>{f.productName}</Abs>
+    <div style={{ width: boxW * scale, height: boxH * scale, flex: '0 0 auto', overflow: 'hidden' }}>
+      <div style={{ width: boxW, height: boxH, transform: `scale(${scale})`, transformOrigin: 'top left', position: 'relative', background: '#fff', color: '#000', fontFamily: 'Helvetica, Arial, sans-serif' }}>
+        {prims.map((p, i) => <Prim key={i} p={p} bc={bc} />)}
       </div>
     </div>
   );
