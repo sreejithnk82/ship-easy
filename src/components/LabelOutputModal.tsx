@@ -15,7 +15,6 @@ export const LabelOutputModal = ({ labels, products, title, filename, onClose }:
 }) => {
   const [fmt, setFmt] = useState<LabelFormat>(getLabelFormat());
   const changeFmt = (f: LabelFormat) => { setFmt(f); setLabelFormat(f); };
-  const productById = new Map(products.map((p) => [p.productId, p]));
   const first = labels[0];
 
   return (
@@ -33,7 +32,7 @@ export const LabelOutputModal = ({ labels, products, title, filename, onClose }:
 
         {first && (
           <div style={{ display: 'flex', justifyContent: 'center', margin: '1rem 0', overflow: 'auto' }}>
-            <LabelTile order={first} product={productById.get(first.productId)} fmt={fmt} scale={0.6} />
+            <LabelTile order={first} products={products} fmt={fmt} scale={0.6} />
           </div>
         )}
 

@@ -11,6 +11,7 @@ import { useToast } from '../components/feedback';
 
 type UiLabel = {
   trackingId: string; productId: string; variant?: string;
+  extraProductIds?: string[]; extraVariants?: string[];
   receiverName: string; receiverPhone: string; receiverPincode: string;
   receiverLine1: string; receiverLine2: string; receiverState?: string;
   status?: string; exportedAt?: string; shippedAt?: string;
@@ -67,7 +68,8 @@ export const History = () => {
       let b = byBatch.get(id);
       if (!b) { b = { batchId: id, createdAt: Date.parse(o.createdAt) || 0, labels: [], products }; byBatch.set(id, b); }
       b.labels.push({
-        trackingId: o.trackingId, productId: o.productId, variant: o.variant, status: o.status,
+        trackingId: o.trackingId, productId: o.productId, variant: o.variant,
+        extraProductIds: o.extraProductIds, extraVariants: o.extraVariants, status: o.status,
         receiverName: o.receiverName, receiverPhone: o.receiverPhone, receiverPincode: o.receiverPincode,
         receiverLine1: o.receiverLine1, receiverLine2: o.receiverLine2, receiverState: o.receiverState,
         exportedAt: o.exportedAt, shippedAt: o.shippedAt,

@@ -43,6 +43,11 @@ const Prim = ({ p, bc }: { p: LabelPrimitive; bc: string }) => {
   };
   if (p.maxW && p.align === 'left') {
     style.left = p.x; style.width = p.maxW; style.whiteSpace = 'pre-line';
+    if (p.maxLines) { // clamp so the preview matches the PDF's line budget (no overlap)
+      style.display = '-webkit-box'; (style as any).WebkitBoxOrient = 'vertical';
+      (style as any).WebkitLineClamp = p.maxLines; style.overflow = 'hidden';
+      style.maxHeight = (p.lineH ?? p.size * 1.15) * p.maxLines;
+    }
   } else if (p.align === 'center') {
     style.left = p.x; style.transform = 'translateX(-50%)'; style.whiteSpace = 'nowrap';
   } else if (p.align === 'right') {
@@ -53,7 +58,7 @@ const Prim = ({ p, bc }: { p: LabelPrimitive; bc: string }) => {
   return <div style={style}>{p.text}</div>;
 };
 
-export const LabelTile = ({ order, product, scale = 1, fmt }: { order: LabelOrder; product?: Product; scale?: number; fmt?: LabelFormat }) => {
+export const LabelTile = ({ order, products, scale = 1, fmt }: { order: LabelOrder; products: Product[]; scale?: number; fmt?: LabelFormat }) => {
   const use = fmt ?? DEFAULT_FMT;
   const [pw, ph] = PAPER_PT[use.paper] || PAPER_PT['4x6'];
   const [cols, rows] = GRID[use.perPage] || [1, 1];
@@ -61,8 +66,9 @@ export const LabelTile = ({ order, product, scale = 1, fmt }: { order: LabelOrde
   const margin = Math.min(cellW, cellH) * 0.03;
   const boxW = cellW - 2 * margin, boxH = cellH - 2 * margin;
 
-  const f = buildLabelFields(order, product);
-  const prims = useMemo(() => computeLabelLayout(boxW, boxH, f), [boxW, boxH, f.trackingId, f.toName, f.pincode]); // eslint-disable-line react-hooks/exhaustive-deps
+  const byId = useMemo(() => new Map(products.map((p) => [p.productId, p])), [products]);
+  const f = buildLabelFields(order, byId);
+  const prims = useMemo(() => computeLabelLayout(boxW, boxH, f), [boxW, boxH, f.trackingId, f.toName, f.pincode, f.products.join('|')]); // eslint-disable-line react-hooks/exhaustive-deps
   const bc = useMemo(() => barcode(f.trackingId), [f.trackingId]);
 
   return (

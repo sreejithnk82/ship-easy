@@ -99,7 +99,7 @@ export interface Assignment { clientOrderId: string; trackingId: string; }
 // A customer's own order with live lifecycle status (server-backed history).
 export interface OrderRow {
   orderId: string; batchId: string; trackingId: string; productId: string;
-  variant?: string; extraVariants?: string[];
+  variant?: string; extraProductIds?: string[]; extraVariants?: string[];
   receiverName: string; receiverPhone: string; receiverPincode: string;
   receiverLine1: string; receiverLine2: string; receiverState: string;
   status: 'labeled' | 'shipped' | 'void' | string;

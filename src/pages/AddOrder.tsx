@@ -237,6 +237,7 @@ export const AddOrder = () => {
         const p = byId.get(a.clientOrderId)!;
         return {
           trackingId: a.trackingId, productId: p.productId,
+          variant: p.variant, extraProductIds: p.extraProductIds || [], extraVariants: p.extraVariants || [],
           receiverName: p.receiverName, receiverPhone: p.receiverPhone,
           receiverPincode: p.receiverPincode, receiverLine1: p.receiverLine1,
           receiverLine2: p.receiverLine2, receiverState: p.receiverState,

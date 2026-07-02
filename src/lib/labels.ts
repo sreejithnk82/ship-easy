@@ -47,8 +47,12 @@ function renderPrimitives(doc: jsPDF, prims: LabelPrimitive[], ox: number, oy: n
       const baseline = oy + pr.y + pr.size * 0.8; // text y = top; jsPDF wants the baseline
       const anchorX = ox + pr.x;
       if (pr.maxW) {
-        const lines = doc.splitTextToSize(pr.text, pr.maxW) as string[];
+        let lines = doc.splitTextToSize(pr.text, pr.maxW) as string[];
         const lh = pr.lineH ?? pr.size * 1.15;
+        if (pr.maxLines && lines.length > pr.maxLines) {
+          lines = lines.slice(0, pr.maxLines);
+          lines[lines.length - 1] = lines[lines.length - 1].replace(/[\s\S]{1}$/, '') + '…'; // ellipsis on truncation
+        }
         lines.forEach((ln, i) => doc.text(ln, anchorX, baseline + i * lh, { align: pr.align } as any));
       } else {
         doc.text(pr.text, anchorX, baseline, { align: pr.align } as any);
@@ -79,7 +83,7 @@ export function buildLabelsPdf(orders: LabelOrder[], products: Product[], fmt: L
     const row = Math.floor(idx / cols);
     const ox = col * cellW + margin;
     const oy = row * cellH + margin;
-    const prims = computeLabelLayout(boxW, boxH, buildLabelFields(o, byId.get(o.productId)));
+    const prims = computeLabelLayout(boxW, boxH, buildLabelFields(o, byId));
     renderPrimitives(doc, prims, ox, oy);
   });
 
