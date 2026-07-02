@@ -16,6 +16,7 @@ import { SuperAdmin } from './pages/SuperAdmin';
 import { ContactAdmin } from './pages/ContactAdmin';
 import { ReloadPrompt } from './ReloadPrompt';
 import { RefreshControl } from './components/RefreshControl';
+import { requestPersistentStorage } from './lib/pwa';
 
 const Brand = () => (
   <div className="sidebar-logo"><Package size={26} /> ShipEasy</div>
@@ -154,6 +155,9 @@ const App = () => {
   useEffect(() => {
     const unsub = onAuthChange(setEmail);
     initAuth().finally(() => setReady(true));
+    // Ask the browser to keep local storage (active orders, caches) durable so
+    // it isn't auto-evicted. Best-effort; won't survive a manual data clear.
+    requestPersistentStorage();
     return unsub;
   }, []);
 

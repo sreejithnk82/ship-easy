@@ -4,12 +4,12 @@ import type { Product } from '../lib/api';
 import { buildLabelFields, LabelOrder } from '../lib/labelModel';
 
 // Fixed-layout on-screen preview of the DTDC label. Mirrors drawLabel() in
-// labels.ts (reference 288×400) so what you see ≈ the PDF.
+// labels.ts (reference 288×432) so what you see ≈ the PDF.
 
 function barcode(value: string): string {
   try {
     const c = document.createElement('canvas');
-    JsBarcode(c, value || ' ', { format: 'CODE128', displayValue: false, height: 60, margin: 0 });
+    JsBarcode(c, value || ' ', { format: 'CODE128', displayValue: false, height: 80, margin: 0 });
     return c.toDataURL('image/png');
   } catch {
     return '';
@@ -17,7 +17,7 @@ function barcode(value: string): string {
 }
 
 const W = 288;
-const H = 400;
+const H = 432;
 
 const Abs = ({ l, t, w, size, bold, italic, color, align, children }: {
   l: number; t: number; w?: number; size: number; bold?: boolean; italic?: boolean; color?: string; align?: 'left' | 'center' | 'right'; children: React.ReactNode;
@@ -35,30 +35,32 @@ export const LabelTile = ({ order, product, scale = 1 }: { order: LabelOrder; pr
     <div style={{ width: W * scale, height: H * scale, flex: '0 0 auto', overflow: 'hidden' }}>
       <div style={{ width: W, height: H, transform: `scale(${scale})`, transformOrigin: 'top left', boxSizing: 'border-box', border: '1px solid #000', position: 'relative', background: '#fff', color: '#000', fontFamily: 'Helvetica, Arial, sans-serif' }}>
         {/* Header */}
-        <Abs l={0} t={16} w={W - 12} size={26} bold italic color="#0d2d5f" align="right">DTDC</Abs>
-        <div style={{ position: 'absolute', left: 0, top: 58, width: W, borderTop: '1px solid #000' }} />
+        <Abs l={0} t={12} w={W - 14} size={30} bold italic color="#0d2d5f" align="right">DTDC</Abs>
+        <div style={{ position: 'absolute', left: 0, top: 52, width: W, borderTop: '1px solid #000' }} />
 
-        {/* From */}
-        <Abs l={12} t={70} size={13} bold>From:</Abs>
-        <Abs l={12} t={94} w={264} size={9} bold>{f.fromName}</Abs>
-        <Abs l={12} t={108} w={264} size={8.5}>{f.fromLines.join('\n')}</Abs>
-        <div style={{ position: 'absolute', left: 0, top: 150, width: W, borderTop: '1px solid #000' }} />
+        {/* From (compact) */}
+        <Abs l={14} t={60} size={11} bold>FROM:</Abs>
+        <Abs l={14} t={78} w={260} size={9.5} bold>{f.fromName}</Abs>
+        <Abs l={14} t={91} w={260} size={8.5}>{f.fromLines.join('\n')}</Abs>
+        <div style={{ position: 'absolute', left: 0, top: 132, width: W, borderTop: '1px solid #000' }} />
 
-        {/* Barcode + tracking id */}
-        {bc && <img src={bc} alt="" style={{ position: 'absolute', left: 150, top: 160, width: 130, height: 30 }} />}
-        <Abs l={150} t={194} w={130} size={11} bold align="center">{f.trackingId}</Abs>
+        {/* Barcode + tracking id (large, centered) */}
+        {bc && <img src={bc} alt="" style={{ position: 'absolute', left: 24, top: 144, width: 240, height: 48 }} />}
+        <Abs l={0} t={192} w={W} size={15} bold align="center">{f.trackingId}</Abs>
+        <div style={{ position: 'absolute', left: 0, top: 214, width: W, borderTop: '1px solid #000' }} />
 
-        {/* To */}
-        <Abs l={12} t={204} size={13} bold>To:</Abs>
-        <Abs l={12} t={228} w={264} size={13} bold>{f.toName}</Abs>
-        <Abs l={12} t={250} w={264} size={11.5}>{f.toLines.join('\n')}</Abs>
+        {/* To (the focus) */}
+        <Abs l={14} t={223} size={12} bold>TO:</Abs>
+        <Abs l={14} t={240} w={260} size={16} bold>{f.toName}</Abs>
+        <Abs l={14} t={266} w={260} size={12.5}>{f.toLines.join('\n')}</Abs>
 
         {/* Big pincode */}
-        <Abs l={12} t={322} size={28} bold>{f.pincode}</Abs>
-        <div style={{ position: 'absolute', left: 0, top: 362, width: W, borderTop: '1px solid #000' }} />
+        <Abs l={14} t={330} size={10} bold>PIN</Abs>
+        <Abs l={14} t={345} size={38} bold>{f.pincode}</Abs>
+        <div style={{ position: 'absolute', left: 0, top: 392, width: W, borderTop: '1px solid #000' }} />
 
         {/* Product */}
-        <Abs l={12} t={372} w={264} size={12}>{f.productName}</Abs>
+        <Abs l={14} t={400} w={260} size={11}>{f.productName}</Abs>
       </div>
     </div>
   );

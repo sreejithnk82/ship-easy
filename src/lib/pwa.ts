@@ -5,6 +5,23 @@
 
 export type UpdateResult = 'updating' | 'current' | 'unsupported';
 
+/**
+ * Ask the browser to treat this origin's storage (IndexedDB + localStorage) as
+ * durable so it isn't auto-evicted under storage pressure. Installed PWAs are
+ * usually granted silently. Best-effort — safe to call on every start.
+ * NOTE: this does NOT survive a manual "Clear browsing data"; it only prevents
+ * automatic eviction.
+ */
+export async function requestPersistentStorage(): Promise<boolean> {
+  try {
+    if (typeof navigator === 'undefined' || !navigator.storage?.persist) return false;
+    if (await navigator.storage.persisted()) return true; // already durable
+    return await navigator.storage.persist();
+  } catch {
+    return false;
+  }
+}
+
 export async function checkAppUpdate(): Promise<UpdateResult> {
   if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return 'unsupported';
   const reg = await navigator.serviceWorker.getRegistration();

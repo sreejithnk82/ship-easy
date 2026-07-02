@@ -1,7 +1,7 @@
 // Build printable DTDC shipping labels as a PDF. The label is laid out once in a
-// reference 288×400pt box (drawLabel) and scaled into whatever paper size /
-// per-page grid the user picked. Runs fully in the browser (jsPDF + JsBarcode),
-// so it works offline once tracking IDs are in hand.
+// reference 288×432pt box (4×6 aspect, so it fills a 4×6 thermal sheet) and
+// scaled into whatever paper size / per-page grid the user picked. Runs fully in
+// the browser (jsPDF + JsBarcode), so it works offline once tracking IDs are in hand.
 
 import jsPDF from 'jspdf';
 import JsBarcode from 'jsbarcode';
@@ -23,13 +23,15 @@ const PAPER_PT: Record<PaperKey, [number, number]> = {
 // Labels-per-page → grid [cols, rows].
 const GRID: Record<number, [number, number]> = { 1: [1, 1], 2: [1, 2], 4: [2, 2], 6: [2, 3], 8: [2, 4] };
 
-// Reference label geometry; everything in drawLabel is in these units.
+// Reference label geometry; everything in drawLabel is in these units. Matches
+// the 4×6 (2:3) label aspect so the design fills a 4×6 thermal sheet edge-to-edge.
 const REF_W = 288;
-const REF_H = 400;
+const REF_H = 432;
 
 function barcodeDataUrl(value: string): string {
   const canvas = document.createElement('canvas');
-  JsBarcode(canvas, value || ' ', { format: 'CODE128', displayValue: false, height: 60, margin: 0 });
+  // Tall render so the wide, scaled-up barcode on the label stays crisp.
+  JsBarcode(canvas, value || ' ', { format: 'CODE128', displayValue: false, height: 80, margin: 0 });
   return canvas.toDataURL('image/png');
 }
 
@@ -53,35 +55,37 @@ function drawLabel(doc: jsPDF, f: LabelFields, ox: number, oy: number, s: number
 
   // ── Header: DTDC mark ──
   doc.setTextColor(13, 45, 95);
-  setF('bolditalic', 26); txt('DTDC', REF_W - 12, 40, { align: 'right' });
+  setF('bolditalic', 30); txt('DTDC', REF_W - 14, 40, { align: 'right' });
   doc.setTextColor(0, 0, 0);
-  hline(58);
+  hline(52);
 
-  // ── From ──
-  setF('bold', 13); txt('From:', 12, 84);
-  setF('bold', 9); txt(f.fromName, 12, 102);
+  // ── From (compact) ──
+  setF('bold', 11); txt('FROM:', 14, 71);
+  setF('bold', 9.5); txt(f.fromName, 14, 87);
   setF('normal', 8.5);
-  let y = 114;
-  f.fromLines.forEach((l) => { y = wrap(l, 12, y, 264, 11); });
-  hline(150);
+  let y = 99;
+  f.fromLines.forEach((l) => { y = wrap(l, 14, y, 260, 11); });
+  hline(132);
 
-  // ── Barcode + tracking id (top-right of the middle band) ──
-  try { doc.addImage(barcodeDataUrl(f.trackingId), 'PNG', X(150), Y(162), 130 * s, 30 * s); } catch { /* ignore */ }
-  setF('bold', 11); txt(f.trackingId, 215, 204, { align: 'center' });
+  // ── Barcode + tracking id (large, centered) ──
+  try { doc.addImage(barcodeDataUrl(f.trackingId), 'PNG', X(24), Y(144), 240 * s, 48 * s); } catch { /* ignore */ }
+  setF('bold', 15); txt(f.trackingId, REF_W / 2, 205, { align: 'center' });
+  hline(214);
 
-  // ── To ──
-  setF('bold', 13); txt('To:', 12, 214);
-  setF('bold', 13); txt(f.toName, 12, 240);
-  setF('normal', 11.5);
-  let ty = 260;
-  f.toLines.forEach((l) => { ty = wrap(l, 12, ty, 264, 16); });
+  // ── To (the focus — bold receiver) ──
+  setF('bold', 12); txt('TO:', 14, 234);
+  setF('bold', 16); txt(f.toName, 14, 256);
+  setF('normal', 12.5);
+  let ty = 278;
+  f.toLines.forEach((l) => { ty = wrap(l, 14, ty, 260, 15); });
 
   // ── Big destination pincode ──
-  setF('bold', 28); txt(f.pincode, 12, 348);
-  hline(362);
+  setF('bold', 10); txt('PIN', 14, 344);
+  setF('bold', 38); txt(f.pincode, 14, 382);
+  hline(392);
 
   // ── Product name ──
-  setF('normal', 12); wrap(f.productName, 12, 384, 264, 14);
+  setF('normal', 11); wrap(f.productName, 14, 411, 260, 13);
 }
 
 /** Build a PDF laying labels out per the chosen paper size + per-page grid. */
