@@ -47,9 +47,14 @@ export interface LabelGeometry {
   cellW: number; cellH: number; gap: number; margin: number;
 }
 export function labelGeometry(fmt: LabelFormat): LabelGeometry {
-  const [pw, ph] = PAPER_PT[fmt.paper] || PAPER_PT['4x6'];
-  const [cols, rows] = GRID[fmt.perPage] || [1, 1];
+  let [pw, ph] = PAPER_PT[fmt.paper] || PAPER_PT['4x6'];
+  let [cols, rows] = GRID[fmt.perPage] || [1, 1];
   const isA4 = fmt.paper === 'a4';
+  // A4 with 8 labels prints LANDSCAPE as a 4×2 grid (each label a clean portrait card).
+  if (isA4 && fmt.perPage === 8) {
+    [pw, ph] = [ph, pw]; // landscape
+    cols = 4; rows = 2;
+  }
   const gap = isA4 ? 18 : 0;    // 0.25in gutter between labels for clean cutting
   const margin = isA4 ? 18 : 6; // outer page margin (thermal labels stay near the edge)
   const cellW = (pw - 2 * margin - (cols - 1) * gap) / cols;

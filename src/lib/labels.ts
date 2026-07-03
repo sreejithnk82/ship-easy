@@ -43,10 +43,13 @@ function renderPrimitives(doc: jsPDF, prims: LabelPrimitive[], ox: number, oy: n
       try {
         const { url, ratio } = barcodeImage(pr.value);
         // Fit inside the slot preserving aspect: fill the height, then clamp to
-        // width if too wide. Centered horizontally, top-aligned. Never stretched.
+        // width if too wide. Aligned within the slot, top. Never stretched.
         let dh = pr.h, dw = dh * ratio;
         if (dw > pr.w) { dw = pr.w; dh = dw / ratio; }
-        doc.addImage(url, 'PNG', ox + pr.x + (pr.w - dw) / 2, oy + pr.y, dw, dh);
+        const dx = pr.align === 'right' ? ox + pr.x + pr.w - dw
+          : pr.align === 'left' ? ox + pr.x
+          : ox + pr.x + (pr.w - dw) / 2;
+        doc.addImage(url, 'PNG', dx, oy + pr.y, dw, dh);
       } catch { /* ignore */ }
     } else {
       doc.setFont('helvetica', pr.weight);
@@ -76,11 +79,12 @@ export function buildLabelsPdf(orders: LabelOrder[], products: Product[], fmt: L
   const byId = new Map(products.map((p) => [p.productId, p]));
   const g = labelGeometry(fmt);
   const perPage = g.cols * g.rows;
+  const orient: 'landscape' | 'portrait' = g.pw > g.ph ? 'landscape' : 'portrait';
 
-  const doc = new jsPDF({ unit: 'pt', format: [g.pw, g.ph] });
+  const doc = new jsPDF({ unit: 'pt', format: [g.pw, g.ph], orientation: orient });
 
   orders.forEach((o, i) => {
-    if (i > 0 && i % perPage === 0) doc.addPage([g.pw, g.ph], 'portrait');
+    if (i > 0 && i % perPage === 0) doc.addPage([g.pw, g.ph], orient);
     const idx = i % perPage;
     const col = idx % g.cols;
     const row = Math.floor(idx / g.cols);

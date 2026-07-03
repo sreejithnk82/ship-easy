@@ -32,8 +32,9 @@ const Prim = ({ p, bc }: { p: LabelPrimitive; bc: string }) => {
   }
   if (p.kind === 'barcode') {
     // objectFit contain preserves the barcode's aspect ratio (no stretching);
-    // top-aligned + centered to match the PDF placement.
-    return bc ? <img src={bc} alt="" style={{ position: 'absolute', left: p.x, top: p.y, width: p.w, height: p.h, objectFit: 'contain', objectPosition: 'top' }} /> : null;
+    // top-aligned, and horizontally placed to match the PDF's align.
+    const pos = p.align === 'right' ? 'right top' : p.align === 'left' ? 'left top' : 'top';
+    return bc ? <img src={bc} alt="" style={{ position: 'absolute', left: p.x, top: p.y, width: p.w, height: p.h, objectFit: 'contain', objectPosition: pos }} /> : null;
   }
   // text: p.y is the top; center/right anchor at p.x via transform.
   const style: React.CSSProperties = {

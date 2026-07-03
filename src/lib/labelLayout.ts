@@ -23,7 +23,7 @@ export type LabelPrimitive =
   | { kind: 'rect'; x: number; y: number; w: number; h: number; lineW: number }
   | { kind: 'line'; x1: number; y1: number; x2: number; y2: number; lineW: number }
   | { kind: 'text'; x: number; y: number; text: string; size: number; weight: LabelWeight; align: LabelAlign; color?: string; maxW?: number; lineH?: number; maxLines?: number }
-  | { kind: 'barcode'; x: number; y: number; w: number; h: number; value: string };
+  | { kind: 'barcode'; x: number; y: number; w: number; h: number; value: string; align?: LabelAlign };
 
 const BLUE = '#0d2d5f';
 const GREY = '#64748b';
@@ -52,37 +52,37 @@ function portraitLayout(w: number, h: number, f: LabelFields): LabelPrimitive[] 
   const x = pad, iw = w - 2 * pad, cx = w / 2;
   const lw = Math.max(0.3, h * 0.0025);
   const rule = (yy: number) => p.push({ kind: 'line', x1: pad, y1: yy, x2: w - pad, y2: yy, lineW: lw });
-  const bar = (yy: number, hh: number) => p.push({ kind: 'barcode', x: w * 0.10, y: yy, w: w * 0.80, h: hh, value: f.trackingId });
+  const bar = (yy: number, hh: number, align: LabelAlign) => p.push({ kind: 'barcode', x: pad, y: yy, w: iw, h: hh, value: f.trackingId, align });
 
   // Header: DTDC + sender name (trimmed to name)
   T('DTDC', w - pad, h * 0.025, h * 0.05, 'bolditalic', 'right', { color: BLUE });
   T('From: ' + f.fromName, x, h * 0.03, h * 0.026, 'bold', 'left', { maxW: iw * 0.72, maxLines: 1 });
-  rule(h * 0.075);
+  rule(h * 0.07);
 
-  // Barcode #1 + tracking
-  bar(h * 0.085, h * 0.085);
-  T(f.trackingId, cx, h * 0.185, h * 0.034, 'bold', 'center', { maxLines: 1 });
-  rule(h * 0.225);
+  // Barcode #1 — smaller, aligned to the RIGHT (a compact secondary scan target)
+  bar(h * 0.08, h * 0.06, 'right');
+  T(f.trackingId, w - pad, h * 0.145, h * 0.028, 'bold', 'right', { maxLines: 1 });
+  rule(h * 0.185);
 
   // PRODUCTS — the large, prominent band (all items + variants)
-  T('ITEMS', x, h * 0.24, h * 0.022, 'bold', 'left', { color: GREY });
-  T(f.products.join('\n'), x, h * 0.27, h * 0.033, 'bold', 'left', { maxW: iw, lineH: h * 0.04, maxLines: 3 });
-  rule(h * 0.40);
+  T('ITEMS', x, h * 0.20, h * 0.022, 'bold', 'left', { color: GREY });
+  T(f.products.join('\n'), x, h * 0.235, h * 0.032, 'bold', 'left', { maxW: iw, lineH: h * 0.038, maxLines: 3 });
+  rule(h * 0.37);
 
-  // Barcode #2 — identical copy, so a second scan target is always in reach
-  bar(h * 0.41, h * 0.085);
-  T(f.trackingId, cx, h * 0.51, h * 0.034, 'bold', 'center', { maxLines: 1 });
-  rule(h * 0.55);
+  // Barcode #2 — the primary, large, CENTERED barcode
+  bar(h * 0.385, h * 0.105, 'center');
+  T(f.trackingId, cx, h * 0.50, h * 0.036, 'bold', 'center', { maxLines: 1 });
+  rule(h * 0.54);
 
   // SHIP TO — name, phone, address
-  T('Ship to:', x, h * 0.56, h * 0.02, 'bold', 'left', { color: GREY });
-  T(f.toName, x, h * 0.585, h * 0.04, 'bold', 'left', { maxW: iw, maxLines: 1 });
-  T('Ph: ' + f.phone, x, h * 0.63, h * 0.027, 'normal', 'left', { maxLines: 1 });
-  T(f.addrLines.join('\n'), x, h * 0.665, h * 0.025, 'normal', 'left', { maxW: iw, lineH: h * 0.031, maxLines: 2 });
+  T('Ship to:', x, h * 0.55, h * 0.02, 'bold', 'left', { color: GREY });
+  T(f.toName, x, h * 0.575, h * 0.04, 'bold', 'left', { maxW: iw, maxLines: 1 });
+  T('Ph: ' + f.phone, x, h * 0.62, h * 0.027, 'normal', 'left', { maxLines: 1 });
+  T(f.addrLines.join('\n'), x, h * 0.655, h * 0.025, 'normal', 'left', { maxW: iw, lineH: h * 0.031, maxLines: 2 });
 
   // Big destination pincode
-  T('PIN', x, h * 0.775, h * 0.022, 'bold', 'left', { color: GREY });
-  T(f.pincode, x, h * 0.805, h * 0.095, 'bold', 'left', { maxLines: 1 });
+  T('PIN', x, h * 0.765, h * 0.022, 'bold', 'left', { color: GREY });
+  T(f.pincode, x, h * 0.795, h * 0.095, 'bold', 'left', { maxLines: 1 });
   return p;
 }
 
@@ -107,14 +107,15 @@ function landscapeLayout(w: number, h: number, f: LabelFields): LabelPrimitive[]
   T('PIN', lx, h * 0.63, h * 0.044, 'bold', 'left', { color: GREY });
   T(f.pincode, lx, h * 0.68, h * 0.14, 'bold', 'left', { maxLines: 1 });
 
-  // Right column: TWO identical barcodes stacked (a second scan target), then items
-  const bar = (yy: number) => p.push({ kind: 'barcode', x: rx, y: yy, w: rW, h: h * 0.14, value: f.trackingId });
-  bar(h * 0.05);
-  T(f.trackingId, rx + rW / 2, h * 0.205, h * 0.042, 'bold', 'center', { maxLines: 1 });
-  bar(h * 0.27);
-  T(f.trackingId, rx + rW / 2, h * 0.425, h * 0.042, 'bold', 'center', { maxLines: 1 });
-  T('ITEMS', rx, h * 0.50, h * 0.04, 'bold', 'left', { color: GREY });
-  T(f.products.join('\n'), rx, h * 0.55, h * 0.05, 'bold', 'left', { maxW: rW, lineH: h * 0.062, maxLines: 3 });
+  // Right column: TWO identical barcodes — a smaller right-aligned one, then the
+  // larger centered primary — then the items list.
+  const bar = (yy: number, hh: number, align: LabelAlign) => p.push({ kind: 'barcode', x: rx, y: yy, w: rW, h: hh, value: f.trackingId, align });
+  bar(h * 0.05, h * 0.11, 'right');
+  T(f.trackingId, w - pad, h * 0.17, h * 0.04, 'bold', 'right', { maxLines: 1 });
+  bar(h * 0.24, h * 0.15, 'center');
+  T(f.trackingId, rx + rW / 2, h * 0.40, h * 0.042, 'bold', 'center', { maxLines: 1 });
+  T('ITEMS', rx, h * 0.48, h * 0.04, 'bold', 'left', { color: GREY });
+  T(f.products.join('\n'), rx, h * 0.53, h * 0.05, 'bold', 'left', { maxW: rW, lineH: h * 0.062, maxLines: 3 });
   return p;
 }
 
