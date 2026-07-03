@@ -27,6 +27,7 @@ export interface LabelFields {
   phone: string;
   addrLines: string[];   // receiver address (line1, line2)
   pincode: string;
+  state: string;         // destination state (shown by the big pincode)
   products: string[];    // every product in the parcel, "Name - Variant"
 }
 
@@ -52,6 +53,7 @@ export function buildLabelFields(o: LabelOrder, byId: Map<string, Product>): Lab
     phone: String(o.receiverPhone || ''),
     addrLines: [o.receiverLine1, o.receiverLine2].filter(Boolean) as string[],
     pincode: String(o.receiverPincode || ''),
+    state: String(o.receiverState || '').trim(),
     products,
   };
 }

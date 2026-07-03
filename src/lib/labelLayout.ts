@@ -74,15 +74,17 @@ function portraitLayout(w: number, h: number, f: LabelFields): LabelPrimitive[] 
   T(f.trackingId, cx, h * 0.50, h * 0.036, 'bold', 'center', { maxLines: 1 });
   rule(h * 0.54);
 
-  // SHIP TO — name, phone, address
-  T('Ship to:', x, h * 0.55, h * 0.02, 'bold', 'left', { color: GREY });
-  T(f.toName, x, h * 0.575, h * 0.04, 'bold', 'left', { maxW: iw, maxLines: 1 });
-  T('Ph: ' + f.phone, x, h * 0.62, h * 0.027, 'normal', 'left', { maxLines: 1 });
-  T(f.addrLines.join('\n'), x, h * 0.655, h * 0.025, 'normal', 'left', { maxW: iw, lineH: h * 0.031, maxLines: 2 });
+  // SHIP TO — name, phone, address. Enlarged to use the space above the pincode
+  // (the pincode is pushed to the bottom of the card, its size unchanged).
+  T('Ship to:', x, h * 0.55, h * 0.022, 'bold', 'left', { color: GREY });
+  T(f.toName, x, h * 0.578, h * 0.055, 'bold', 'left', { maxW: iw, maxLines: 1 });
+  T('Ph: ' + f.phone, x, h * 0.645, h * 0.042, 'bold', 'left', { maxLines: 1 });
+  T(f.addrLines.join('\n'), x, h * 0.70, h * 0.034, 'normal', 'left', { maxW: iw, lineH: h * 0.041, maxLines: 2 });
 
-  // Big destination pincode
-  T('PIN', x, h * 0.765, h * 0.022, 'bold', 'left', { color: GREY });
-  T(f.pincode, x, h * 0.795, h * 0.095, 'bold', 'left', { maxLines: 1 });
+  // Destination pincode + state — moved to the bottom of the card
+  T('PIN', x, h * 0.815, h * 0.022, 'bold', 'left', { color: GREY });
+  T(f.pincode, x, h * 0.845, h * 0.10, 'bold', 'left', { maxLines: 1 });
+  if (f.state) T(f.state, w - pad, h * 0.88, h * 0.04, 'bold', 'right', { maxW: iw * 0.5, maxLines: 1 });
   return p;
 }
 
@@ -104,8 +106,9 @@ function landscapeLayout(w: number, h: number, f: LabelFields): LabelPrimitive[]
   T(f.toName, lx, h * 0.20, h * 0.075, 'bold', 'left', { maxW: lW, maxLines: 1 });
   T('Ph: ' + f.phone, lx, h * 0.32, h * 0.05, 'normal', 'left', { maxLines: 1 });
   T(f.addrLines.join('\n'), lx, h * 0.41, h * 0.046, 'normal', 'left', { maxW: lW, lineH: h * 0.056, maxLines: 2 });
-  T('PIN', lx, h * 0.63, h * 0.044, 'bold', 'left', { color: GREY });
-  T(f.pincode, lx, h * 0.68, h * 0.14, 'bold', 'left', { maxLines: 1 });
+  T('PIN', lx, h * 0.64, h * 0.044, 'bold', 'left', { color: GREY });
+  T(f.pincode, lx, h * 0.685, h * 0.14, 'bold', 'left', { maxLines: 1 });
+  if (f.state) T(f.state, lx, h * 0.88, h * 0.05, 'bold', 'left', { maxW: lW, maxLines: 1 });
 
   // Right column: TWO identical barcodes — a smaller right-aligned one, then the
   // larger centered primary — then the items list.

@@ -160,17 +160,35 @@ function action_updateProduct_(payload, ctx) {
   if (!row) return { ok: false, error: 'NOT_FOUND' };
   var setCell = function (name, val) { var col = data.headers.indexOf(name) + 1; if (col > 0) sheet.getRange(row._row, col).setValue(val); };
 
-  var changed = 0;
+  // Compare a new value against the stored one, treating blank as 0 for numbers
+  // so unchanged numeric cells (e.g. 0 vs "") don't read as edits.
+  var eq_ = function (a, b) {
+    var sa = (a == null ? '' : String(a)).trim();
+    var sb = (b == null ? '' : String(b)).trim();
+    if (sa === sb) return true;
+    var na = sa === '' ? 0 : parseFloat(sa), nb = sb === '' ? 0 : parseFloat(sb);
+    return !isNaN(na) && !isNaN(nb) && na === nb;
+  };
+
+  var changed = 0, shippingChanged = false;
   Object.keys(PRODUCT_COLMAP).forEach(function (k) {
     if (p[k] === undefined) return;
-    var col = data.headers.indexOf(PRODUCT_COLMAP[k]) + 1;
+    var colName = PRODUCT_COLMAP[k];
+    var col = data.headers.indexOf(colName) + 1;
     if (col < 1) return;
+    // Only a change to a shipping field (anything but the variant labels) forces
+    // a member's product back to pending — variants share one shipping profile.
+    if (k !== 'variants' && !eq_(row[colName], p[k])) shippingChanged = true;
     sheet.getRange(row._row, col).setValue(p[k]);
     changed++;
   });
-  // A member edit needs re-verification; an admin/superadmin edit stays verified.
+  // Re-verification policy on edit:
+  //  • admin/superadmin edits stay verified;
+  //  • a member edit that touched a shipping field goes back to pending;
+  //  • a member edit that changed ONLY the variant labels keeps its current
+  //    status — the parcel is identical, so no admin re-approval is needed.
   if (isAdmin_(ctx)) { setCell('status', 'verified'); setCell('verified_by', ctx.email); setCell('verified_at', nowIso_()); }
-  else { setCell('status', 'pending'); setCell('verified_by', ''); setCell('verified_at', ''); }
+  else if (shippingChanged) { setCell('status', 'pending'); setCell('verified_by', ''); setCell('verified_at', ''); }
   SpreadsheetApp.flush();
   return { ok: true, changed: changed };
 }
