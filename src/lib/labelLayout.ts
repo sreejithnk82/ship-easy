@@ -74,10 +74,11 @@ function portraitLayout(w: number, h: number, f: LabelFields): LabelPrimitive[] 
   T(f.trackingId, cx, h * 0.51, h * 0.034, 'bold', 'center', { maxLines: 1 });
   rule(h * 0.55);
 
-  // TO — name, phone, address
-  T(f.toName, x, h * 0.565, h * 0.042, 'bold', 'left', { maxW: iw, maxLines: 1 });
-  T('Ph: ' + f.phone, x, h * 0.615, h * 0.028, 'normal', 'left', { maxLines: 1 });
-  T(f.addrLines.join('\n'), x, h * 0.65, h * 0.026, 'normal', 'left', { maxW: iw, lineH: h * 0.032, maxLines: 2 });
+  // SHIP TO — name, phone, address
+  T('Ship to:', x, h * 0.56, h * 0.02, 'bold', 'left', { color: GREY });
+  T(f.toName, x, h * 0.585, h * 0.04, 'bold', 'left', { maxW: iw, maxLines: 1 });
+  T('Ph: ' + f.phone, x, h * 0.63, h * 0.027, 'normal', 'left', { maxLines: 1 });
+  T(f.addrLines.join('\n'), x, h * 0.665, h * 0.025, 'normal', 'left', { maxW: iw, lineH: h * 0.031, maxLines: 2 });
 
   // Big destination pincode
   T('PIN', x, h * 0.775, h * 0.022, 'bold', 'left', { color: GREY });
@@ -99,6 +100,7 @@ function landscapeLayout(w: number, h: number, f: LabelFields): LabelPrimitive[]
   p.push({ kind: 'line', x1: colX, y1: pad, x2: colX, y2: h - pad, lineW: lw });
 
   // Left column: receiver (name / phone / address / big pincode)
+  T('Ship to:', lx, h * 0.14, h * 0.04, 'bold', 'left', { color: GREY });
   T(f.toName, lx, h * 0.20, h * 0.075, 'bold', 'left', { maxW: lW, maxLines: 1 });
   T('Ph: ' + f.phone, lx, h * 0.32, h * 0.05, 'normal', 'left', { maxLines: 1 });
   T(f.addrLines.join('\n'), lx, h * 0.41, h * 0.046, 'normal', 'left', { maxW: lW, lineH: h * 0.056, maxLines: 2 });

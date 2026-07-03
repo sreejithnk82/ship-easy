@@ -31,7 +31,9 @@ const Prim = ({ p, bc }: { p: LabelPrimitive; bc: string }) => {
     return <div style={{ position: 'absolute', left: p.x1, top: p.y1, width: vertical ? 0 : p.x2 - p.x1, height: vertical ? p.y2 - p.y1 : 0, borderTop: vertical ? undefined : `${p.lineW}px solid #000`, borderLeft: vertical ? `${p.lineW}px solid #000` : undefined }} />;
   }
   if (p.kind === 'barcode') {
-    return bc ? <img src={bc} alt="" style={{ position: 'absolute', left: p.x, top: p.y, width: p.w, height: p.h }} /> : null;
+    // objectFit contain preserves the barcode's aspect ratio (no stretching);
+    // top-aligned + centered to match the PDF placement.
+    return bc ? <img src={bc} alt="" style={{ position: 'absolute', left: p.x, top: p.y, width: p.w, height: p.h, objectFit: 'contain', objectPosition: 'top' }} /> : null;
   }
   // text: p.y is the top; center/right anchor at p.x via transform.
   const style: React.CSSProperties = {

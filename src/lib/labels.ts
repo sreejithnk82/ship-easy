@@ -15,11 +15,13 @@ import { computeLabelLayout, LabelPrimitive } from './labelLayout';
 export type { LabelOrder } from './labelModel';
 import type { LabelOrder } from './labelModel';
 
-function barcodeDataUrl(value: string): string {
+// Render the barcode and return its natural pixel aspect ratio, so callers can
+// place it WITHOUT stretching (non-uniform scaling ruins the bar widths).
+function barcodeImage(value: string): { url: string; ratio: number } {
   const canvas = document.createElement('canvas');
-  // Tall render so the wide, scaled-up barcode on the label stays crisp.
-  JsBarcode(canvas, value || ' ', { format: 'CODE128', displayValue: false, height: 80, margin: 0 });
-  return canvas.toDataURL('image/png');
+  // Thick modules (width 3) + quiet zone (margin) → crisp, scannable bars.
+  JsBarcode(canvas, value || ' ', { format: 'CODE128', displayValue: false, height: 50, width: 3, margin: 8 });
+  return { url: canvas.toDataURL('image/png'), ratio: canvas.width / canvas.height };
 }
 
 function hexToRgb(hex: string): [number, number, number] {
@@ -38,7 +40,14 @@ function renderPrimitives(doc: jsPDF, prims: LabelPrimitive[], ox: number, oy: n
       doc.setLineWidth(pr.lineW);
       doc.line(ox + pr.x1, oy + pr.y1, ox + pr.x2, oy + pr.y2);
     } else if (pr.kind === 'barcode') {
-      try { doc.addImage(barcodeDataUrl(pr.value), 'PNG', ox + pr.x, oy + pr.y, pr.w, pr.h); } catch { /* ignore */ }
+      try {
+        const { url, ratio } = barcodeImage(pr.value);
+        // Fit inside the slot preserving aspect: fill the height, then clamp to
+        // width if too wide. Centered horizontally, top-aligned. Never stretched.
+        let dh = pr.h, dw = dh * ratio;
+        if (dw > pr.w) { dw = pr.w; dh = dw / ratio; }
+        doc.addImage(url, 'PNG', ox + pr.x + (pr.w - dw) / 2, oy + pr.y, dw, dh);
+      } catch { /* ignore */ }
     } else {
       doc.setFont('helvetica', pr.weight);
       doc.setFontSize(pr.size);
