@@ -8,7 +8,8 @@
 //
 // Priorities kept on every size: scannable barcode + tracking, ALL products
 // (name + variant), receiver name, pincode, phone. Sender is name-only (dropped
-// on tiny labels); receiver address is shown only where there's room.
+// on tiny labels); receiver address is shown only where there's room. Roomy
+// sizes carry TWO identical barcodes (a backup scan target); tiny sizes keep one.
 //   • portrait  (w/h < 1.15, incl. squares)
 //   • landscape (w/h ≥ 1.15) — receiver left, barcode + big product list right
 //   • minimal   (min side < 150pt) — barcode, products, name, pincode, phone
@@ -51,30 +52,36 @@ function portraitLayout(w: number, h: number, f: LabelFields): LabelPrimitive[] 
   const x = pad, iw = w - 2 * pad, cx = w / 2;
   const lw = Math.max(0.3, h * 0.0025);
   const rule = (yy: number) => p.push({ kind: 'line', x1: pad, y1: yy, x2: w - pad, y2: yy, lineW: lw });
+  const bar = (yy: number, hh: number) => p.push({ kind: 'barcode', x: w * 0.10, y: yy, w: w * 0.80, h: hh, value: f.trackingId });
 
   // Header: DTDC + sender name (trimmed to name)
-  T('DTDC', w - pad, h * 0.03, h * 0.055, 'bolditalic', 'right', { color: BLUE });
-  T('From: ' + f.fromName, x, h * 0.04, h * 0.028, 'bold', 'left', { maxW: iw * 0.72, maxLines: 1 });
-  rule(h * 0.10);
+  T('DTDC', w - pad, h * 0.025, h * 0.05, 'bolditalic', 'right', { color: BLUE });
+  T('From: ' + f.fromName, x, h * 0.03, h * 0.026, 'bold', 'left', { maxW: iw * 0.72, maxLines: 1 });
+  rule(h * 0.075);
 
-  // Barcode + tracking
-  p.push({ kind: 'barcode', x: w * 0.10, y: h * 0.115, w: w * 0.80, h: h * 0.11, value: f.trackingId });
-  T(f.trackingId, cx, h * 0.245, h * 0.04, 'bold', 'center', { maxLines: 1 });
-  rule(h * 0.295);
+  // Barcode #1 + tracking
+  bar(h * 0.085, h * 0.085);
+  T(f.trackingId, cx, h * 0.185, h * 0.034, 'bold', 'center', { maxLines: 1 });
+  rule(h * 0.225);
 
   // PRODUCTS — the large, prominent band (all items + variants)
-  T('ITEMS', x, h * 0.31, h * 0.024, 'bold', 'left', { color: GREY });
-  T(f.products.join('\n'), x, h * 0.345, h * 0.037, 'bold', 'left', { maxW: iw, lineH: h * 0.047, maxLines: 4 });
+  T('ITEMS', x, h * 0.24, h * 0.022, 'bold', 'left', { color: GREY });
+  T(f.products.join('\n'), x, h * 0.27, h * 0.033, 'bold', 'left', { maxW: iw, lineH: h * 0.04, maxLines: 3 });
+  rule(h * 0.40);
+
+  // Barcode #2 — identical copy, so a second scan target is always in reach
+  bar(h * 0.41, h * 0.085);
+  T(f.trackingId, cx, h * 0.51, h * 0.034, 'bold', 'center', { maxLines: 1 });
   rule(h * 0.55);
 
   // TO — name, phone, address
-  T(f.toName, x, h * 0.565, h * 0.046, 'bold', 'left', { maxW: iw, maxLines: 1 });
-  T('Ph: ' + f.phone, x, h * 0.62, h * 0.03, 'normal', 'left', { maxLines: 1 });
-  T(f.addrLines.join('\n'), x, h * 0.66, h * 0.028, 'normal', 'left', { maxW: iw, lineH: h * 0.034, maxLines: 2 });
+  T(f.toName, x, h * 0.565, h * 0.042, 'bold', 'left', { maxW: iw, maxLines: 1 });
+  T('Ph: ' + f.phone, x, h * 0.615, h * 0.028, 'normal', 'left', { maxLines: 1 });
+  T(f.addrLines.join('\n'), x, h * 0.65, h * 0.026, 'normal', 'left', { maxW: iw, lineH: h * 0.032, maxLines: 2 });
 
   // Big destination pincode
-  T('PIN', x, h * 0.80, h * 0.024, 'bold', 'left', { color: GREY });
-  T(f.pincode, x, h * 0.83, h * 0.10, 'bold', 'left', { maxLines: 1 });
+  T('PIN', x, h * 0.775, h * 0.022, 'bold', 'left', { color: GREY });
+  T(f.pincode, x, h * 0.805, h * 0.095, 'bold', 'left', { maxLines: 1 });
   return p;
 }
 
@@ -87,22 +94,25 @@ function landscapeLayout(w: number, h: number, f: LabelFields): LabelPrimitive[]
   const lx = pad, lW = colX - 2 * pad;
   const rx = colX + pad, rW = w - rx - pad;
 
-  T('DTDC', w - pad, h * 0.06, h * 0.085, 'bolditalic', 'right', { color: BLUE });
-  T('From: ' + f.fromName, lx, h * 0.06, h * 0.05, 'bold', 'left', { maxW: lW, maxLines: 1 });
+  T('DTDC', w - pad, h * 0.05, h * 0.075, 'bolditalic', 'right', { color: BLUE });
+  T('From: ' + f.fromName, lx, h * 0.05, h * 0.048, 'bold', 'left', { maxW: lW, maxLines: 1 });
   p.push({ kind: 'line', x1: colX, y1: pad, x2: colX, y2: h - pad, lineW: lw });
 
   // Left column: receiver (name / phone / address / big pincode)
-  T(f.toName, lx, h * 0.22, h * 0.08, 'bold', 'left', { maxW: lW, maxLines: 1 });
-  T('Ph: ' + f.phone, lx, h * 0.35, h * 0.052, 'normal', 'left', { maxLines: 1 });
-  T(f.addrLines.join('\n'), lx, h * 0.44, h * 0.048, 'normal', 'left', { maxW: lW, lineH: h * 0.058, maxLines: 2 });
-  T('PIN', lx, h * 0.66, h * 0.045, 'bold', 'left', { color: GREY });
-  T(f.pincode, lx, h * 0.71, h * 0.14, 'bold', 'left', { maxLines: 1 });
+  T(f.toName, lx, h * 0.20, h * 0.075, 'bold', 'left', { maxW: lW, maxLines: 1 });
+  T('Ph: ' + f.phone, lx, h * 0.32, h * 0.05, 'normal', 'left', { maxLines: 1 });
+  T(f.addrLines.join('\n'), lx, h * 0.41, h * 0.046, 'normal', 'left', { maxW: lW, lineH: h * 0.056, maxLines: 2 });
+  T('PIN', lx, h * 0.63, h * 0.044, 'bold', 'left', { color: GREY });
+  T(f.pincode, lx, h * 0.68, h * 0.14, 'bold', 'left', { maxLines: 1 });
 
-  // Right column: barcode + tracking, then the large product list
-  p.push({ kind: 'barcode', x: rx, y: h * 0.10, w: rW, h: h * 0.18, value: f.trackingId });
-  T(f.trackingId, rx + rW / 2, h * 0.32, h * 0.05, 'bold', 'center', { maxLines: 1 });
-  T('ITEMS', rx, h * 0.44, h * 0.045, 'bold', 'left', { color: GREY });
-  T(f.products.join('\n'), rx, h * 0.50, h * 0.055, 'bold', 'left', { maxW: rW, lineH: h * 0.07, maxLines: 5 });
+  // Right column: TWO identical barcodes stacked (a second scan target), then items
+  const bar = (yy: number) => p.push({ kind: 'barcode', x: rx, y: yy, w: rW, h: h * 0.14, value: f.trackingId });
+  bar(h * 0.05);
+  T(f.trackingId, rx + rW / 2, h * 0.205, h * 0.042, 'bold', 'center', { maxLines: 1 });
+  bar(h * 0.27);
+  T(f.trackingId, rx + rW / 2, h * 0.425, h * 0.042, 'bold', 'center', { maxLines: 1 });
+  T('ITEMS', rx, h * 0.50, h * 0.04, 'bold', 'left', { color: GREY });
+  T(f.products.join('\n'), rx, h * 0.55, h * 0.05, 'bold', 'left', { maxW: rW, lineH: h * 0.062, maxLines: 3 });
   return p;
 }
 

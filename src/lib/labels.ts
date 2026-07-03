@@ -9,7 +9,7 @@ import type { Product } from './api';
 import { triggerDownload } from './dtdc';
 import { istDayKey } from './datetime';
 import { buildLabelFields } from './labelModel';
-import { PAPER_PT, GRID, type LabelFormat } from './labelFormat';
+import { labelGeometry, labelCellOrigin, type LabelFormat } from './labelFormat';
 import { computeLabelLayout, LabelPrimitive } from './labelLayout';
 
 export type { LabelOrder } from './labelModel';
@@ -65,25 +65,18 @@ function renderPrimitives(doc: jsPDF, prims: LabelPrimitive[], ox: number, oy: n
 /** Build a PDF laying labels out per the chosen paper size + per-page grid. */
 export function buildLabelsPdf(orders: LabelOrder[], products: Product[], fmt: LabelFormat): Blob {
   const byId = new Map(products.map((p) => [p.productId, p]));
-  const [pw, ph] = PAPER_PT[fmt.paper] || PAPER_PT['4x6'];
-  const [cols, rows] = GRID[fmt.perPage] || [1, 1];
-  const perPage = cols * rows;
-  const cellW = pw / cols;
-  const cellH = ph / rows;
-  const margin = Math.min(cellW, cellH) * 0.03;
-  const boxW = cellW - 2 * margin;
-  const boxH = cellH - 2 * margin;
+  const g = labelGeometry(fmt);
+  const perPage = g.cols * g.rows;
 
-  const doc = new jsPDF({ unit: 'pt', format: [pw, ph] });
+  const doc = new jsPDF({ unit: 'pt', format: [g.pw, g.ph] });
 
   orders.forEach((o, i) => {
-    if (i > 0 && i % perPage === 0) doc.addPage([pw, ph], 'portrait');
+    if (i > 0 && i % perPage === 0) doc.addPage([g.pw, g.ph], 'portrait');
     const idx = i % perPage;
-    const col = idx % cols;
-    const row = Math.floor(idx / cols);
-    const ox = col * cellW + margin;
-    const oy = row * cellH + margin;
-    const prims = computeLabelLayout(boxW, boxH, buildLabelFields(o, byId));
+    const col = idx % g.cols;
+    const row = Math.floor(idx / g.cols);
+    const [ox, oy] = labelCellOrigin(g, col, row);
+    const prims = computeLabelLayout(g.cellW, g.cellH, buildLabelFields(o, byId));
     renderPrimitives(doc, prims, ox, oy);
   });
 

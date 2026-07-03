@@ -37,6 +37,28 @@ export const PER_PAGE_BY_PAPER: Record<PaperKey, number[]> = {
 export function perPageOptionsFor(paper: PaperKey): number[] {
   return PER_PAGE_BY_PAPER[paper] || [1];
 }
+
+// Sheet geometry for a format: the per-label cell size, plus the cutting gutter
+// between labels and the outer page margin (A4 sheets get equal gaps so labels
+// can be cut apart cleanly; dedicated label sizes fill the sheet). Shared by the
+// PDF builder and the preview so they always agree.
+export interface LabelGeometry {
+  pw: number; ph: number; cols: number; rows: number;
+  cellW: number; cellH: number; gap: number; margin: number;
+}
+export function labelGeometry(fmt: LabelFormat): LabelGeometry {
+  const [pw, ph] = PAPER_PT[fmt.paper] || PAPER_PT['4x6'];
+  const [cols, rows] = GRID[fmt.perPage] || [1, 1];
+  const isA4 = fmt.paper === 'a4';
+  const gap = isA4 ? 18 : 0;    // 0.25in gutter between labels for clean cutting
+  const margin = isA4 ? 18 : 6; // outer page margin (thermal labels stay near the edge)
+  const cellW = (pw - 2 * margin - (cols - 1) * gap) / cols;
+  const cellH = (ph - 2 * margin - (rows - 1) * gap) / rows;
+  return { pw, ph, cols, rows, cellW, cellH, gap, margin };
+}
+export function labelCellOrigin(g: LabelGeometry, col: number, row: number): [number, number] {
+  return [g.margin + col * (g.cellW + g.gap), g.margin + row * (g.cellH + g.gap)];
+}
 // The sensible default count for a paper (A4 → a 2×2 quarter sheet; others → 1).
 export function defaultPerPageFor(paper: PaperKey): number {
   return paper === 'a4' ? 4 : 1;

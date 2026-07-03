@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import JsBarcode from 'jsbarcode';
 import type { Product } from '../lib/api';
 import { buildLabelFields, LabelOrder } from '../lib/labelModel';
-import { PAPER_PT, GRID, LabelFormat } from '../lib/labelFormat';
+import { labelGeometry, LabelFormat } from '../lib/labelFormat';
 import { computeLabelLayout, LabelPrimitive } from '../lib/labelLayout';
 
 // On-screen preview of a label. Renders the SAME primitives as the PDF
@@ -60,11 +60,8 @@ const Prim = ({ p, bc }: { p: LabelPrimitive; bc: string }) => {
 
 export const LabelTile = ({ order, products, scale = 1, fmt }: { order: LabelOrder; products: Product[]; scale?: number; fmt?: LabelFormat }) => {
   const use = fmt ?? DEFAULT_FMT;
-  const [pw, ph] = PAPER_PT[use.paper] || PAPER_PT['4x6'];
-  const [cols, rows] = GRID[use.perPage] || [1, 1];
-  const cellW = pw / cols, cellH = ph / rows;
-  const margin = Math.min(cellW, cellH) * 0.03;
-  const boxW = cellW - 2 * margin, boxH = cellH - 2 * margin;
+  const g = labelGeometry(use);
+  const boxW = g.cellW, boxH = g.cellH;
 
   const byId = useMemo(() => new Map(products.map((p) => [p.productId, p])), [products]);
   const f = buildLabelFields(order, byId);
