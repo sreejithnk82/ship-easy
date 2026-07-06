@@ -71,10 +71,11 @@ export interface SenderAddress {
 }
 export interface Product {
   productId: string;
-  productCode: string;
   name: string;
+  nickname: string;       // internal owner tag (e.g. "Perfumaina - Nihal") — reports/pickers, never printed
   hubCustomerCode: string;
   senderAddressId: string;
+  // Sender block is resolved live from the referenced address (read-only here).
   senderName: string; senderPhone: string; senderAddr1: string; senderAddr2: string;
   senderCity: string; senderState: string; senderPincode: string; senderEmail: string;
   content: string;
@@ -83,7 +84,6 @@ export interface Product {
   weightG: number; lengthCm: number; widthCm: number; heightCm: number;
   variants?: string[];    // optional sub-type labels (color / material / ml …); same shipping profile
   status?: string;        // 'verified' | 'pending' — only verified can be booked
-  createdBy?: string; verifiedBy?: string; verifiedAt?: string;
 }
 export interface OrderInput {
   clientOrderId: string; productId: string;
@@ -108,7 +108,12 @@ export interface OrderRow {
 export interface Balance { customerId: string; name: string; remaining: number; low: boolean; }
 export interface Health { orderRows: number; columns: number; orderCells: number; cellLimit: number; warn: boolean; pctOfLimit: number; }
 export interface ShipmentReportDay { day: string; total: number; states: Record<string, number>; }
-export interface ShipmentReport { days: ShipmentReportDay[]; totals: Record<string, number>; total: number; }
+// A product's shipped tally over the period: its name, owner nick name, total, and per-state split.
+export interface ShipmentReportProduct { product: string; nickname: string; total: number; states: Record<string, number>; }
+export interface ShipmentReport {
+  days: ShipmentReportDay[]; totals: Record<string, number>; total: number;
+  products: ShipmentReportProduct[];
+}
 
 export interface Customer {
   customerId: string; name: string; spreadsheetId?: string;

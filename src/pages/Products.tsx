@@ -9,7 +9,7 @@ import { NEW_ADDRESS_KEY } from './Addresses';
 import { useToast, useConfirm } from '../components/feedback';
 
 const EMPTY = {
-  name: '', hubCustomerCode: '', senderAddressId: '',
+  name: '', nickname: '', hubCustomerCode: '', senderAddressId: '',
   content: 'OTHERS', description: '', declaredValue: '',
   weightG: '', lengthCm: '', widthCm: '', heightCm: '',
   variants: '', // sub-type labels, comma/newline separated (e.g. "Red, Blue, 100ml")
@@ -92,7 +92,7 @@ export const Products = () => {
   const startEdit = (p: Product) => {
     setEditingId(p.productId);
     setForm({
-      name: p.name, hubCustomerCode: p.hubCustomerCode, senderAddressId: p.senderAddressId || '',
+      name: p.name, nickname: p.nickname || '', hubCustomerCode: p.hubCustomerCode, senderAddressId: p.senderAddressId || '',
       content: p.content || 'OTHERS', description: p.description, declaredValue: String(p.declaredValue),
       weightG: String(p.weightG), lengthCm: String(p.lengthCm), widthCm: String(p.widthCm), heightCm: String(p.heightCm),
       variants: (p.variants || []).join(', '),
@@ -116,10 +116,15 @@ export const Products = () => {
 
   const save = async () => {
     if (!form.name || !form.weightG) { notify('Product name and weight are required.', 'error'); return; }
+    if (!form.nickname.trim()) { notify('Nick name is required.', 'error'); return; }
     if (!form.senderAddressId) { notify('Choose a sender address.', 'error'); return; }
+    const nn = form.nickname.trim().toLowerCase();
+    if (products.some((p) => p.productId !== editingId && (p.nickname || '').trim().toLowerCase() === nn)) {
+      notify('That nick name is already used by another product.', 'error'); return;
+    }
     setSaving(true);
     const payload = {
-      name: form.name, hubCustomerCode: form.hubCustomerCode, senderAddressId: form.senderAddressId,
+      name: form.name, nickname: form.nickname.trim(), hubCustomerCode: form.hubCustomerCode, senderAddressId: form.senderAddressId,
       content: form.content || 'OTHERS', description: form.description || form.name,
       declaredValue: Number(form.declaredValue) || 0,
       weightG: Number(form.weightG), lengthCm: Number(form.lengthCm) || 0,
@@ -216,6 +221,15 @@ export const Products = () => {
           </div>
 
           <div className="input-group" style={{ margin: '0.75rem 0 0' }}>
+            <label className="input-label">Nick Name *</label>
+            <input className="input-field" value={form.nickname} onChange={(e) => set('nickname')(e.target.value)}
+              placeholder="e.g. Perfumaina - Nihal" />
+            <p style={{ margin: '0.35rem 0 0', fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+              Internal owner tag — shown in reports &amp; pickers, never printed on the label. Must be unique.
+            </p>
+          </div>
+
+          <div className="input-group" style={{ margin: '0.75rem 0 0' }}>
             <label className="input-label">Variants / sub-types (optional)</label>
             <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'stretch' }}>
               <input className="input-field" readOnly value={form.variants} placeholder="No variants"
@@ -253,6 +267,11 @@ export const Products = () => {
                 </div>
               )}
               <h4 style={{ margin: '0 0 0.25rem 0', paddingRight: canManage ? (canVerify ? '4.5rem' : '2.5rem') : 0 }}>{p.name}</h4>
+              {p.nickname && (
+                <div style={{ fontSize: '0.78rem', color: 'var(--primary-color)', fontWeight: 600, marginBottom: '0.2rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                  <Tag size={12} /> {p.nickname}
+                </div>
+              )}
               <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>{p.senderName} · {p.hubCustomerCode}</div>
               <p style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--primary-color)', margin: '0 0 1rem 0' }}>₹{p.declaredValue}</p>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>

@@ -385,7 +385,7 @@ export const AddOrder = () => {
               <select className="input-field" value={f.productId} onChange={(e) => setF({ ...f, productId: e.target.value, variant: '' })}
                 style={attempted && !f.productId ? { borderColor: 'var(--danger-color)' } : undefined}>
                 <option value="">-- Choose --</option>
-                {bookableSorted.map((p) => <option key={p.productId} value={p.productId}>{p.name} ({p.weightG}g)</option>)}
+                {bookableSorted.map((p) => <option key={p.productId} value={p.productId}>{p.name}{p.nickname ? ` · ${p.nickname}` : ''} ({p.weightG}g)</option>)}
               </select>
               {attempted && !f.productId && <div style={{ color: 'var(--danger-color)', fontSize: '0.75rem', marginTop: '0.25rem' }}>Select a product</div>}
             </div>
@@ -411,7 +411,7 @@ export const AddOrder = () => {
                   <div key={i} style={{ marginBottom: '0.5rem' }}>
                     <select className="input-field" value={id} onChange={(e) => setExtra(i, e.target.value)}>
                       <option value="">— remove —</option>
-                      {bookableSorted.map((p) => <option key={p.productId} value={p.productId}>{p.name} ({p.weightG}g)</option>)}
+                      {bookableSorted.map((p) => <option key={p.productId} value={p.productId}>{p.name}{p.nickname ? ` · ${p.nickname}` : ''} ({p.weightG}g)</option>)}
                     </select>
                     {variantsOf(id).length > 0 && (
                       <select className="input-field" value={(f.extraVariants || [])[i] || ''} onChange={(e) => setExtraVariant(i, e.target.value)}
@@ -425,7 +425,7 @@ export const AddOrder = () => {
                 {(f.extraProductIds || []).length < MAX_EXTRA && (
                   <select className="input-field" value="" onChange={(e) => addExtra(e.target.value)}>
                     <option value="">+ Add another product…</option>
-                    {bookableSorted.map((p) => <option key={p.productId} value={p.productId}>{p.name} ({p.weightG}g)</option>)}
+                    {bookableSorted.map((p) => <option key={p.productId} value={p.productId}>{p.name}{p.nickname ? ` · ${p.nickname}` : ''} ({p.weightG}g)</option>)}
                   </select>
                 )}
               </div>

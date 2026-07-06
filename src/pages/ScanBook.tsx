@@ -440,6 +440,7 @@ const ShipmentReportModal = ({ report, loading, from, to, onFrom, onTo, onClose 
   report: ShipmentReport | null; loading: boolean; from: string; to: string;
   onFrom: (v: string) => void; onTo: (v: string) => void; onClose: () => void;
 }) => {
+  const [tab, setTab] = useState<'state' | 'product'>('state');
   const totals = report ? Object.entries(report.totals).sort((a, b) => b[1] - a[1]) : [];
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 3000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1.25rem' }}>
@@ -448,7 +449,7 @@ const ShipmentReportModal = ({ report, loading, from, to, onFrom, onTo, onClose 
           <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}><CalendarClock size={20} /> Shipment report</h3>
           <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={22} /></button>
         </div>
-        <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: '0 0 0.6rem' }}>Shipped parcels by day and state (IST) — for billing.</p>
+        <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: '0 0 0.6rem' }}>Shipped parcels (IST) — by state for billing, or by product.</p>
 
         <div style={{ display: 'flex', gap: '0.6rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
           <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>From
@@ -459,23 +460,30 @@ const ShipmentReportModal = ({ report, loading, from, to, onFrom, onTo, onClose 
           </label>
         </div>
 
+        <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.85rem' }}>
+          <button className={`btn ${tab === 'state' ? 'btn-primary' : 'btn-outline'}`} style={{ flex: 1, padding: '0.4rem' }} onClick={() => setTab('state')}>By state</button>
+          <button className={`btn ${tab === 'product' ? 'btn-primary' : 'btn-outline'}`} style={{ flex: 1, padding: '0.4rem' }} onClick={() => setTab('product')}>By product</button>
+        </div>
+
         {loading ? <p style={{ color: 'var(--text-secondary)' }}>Loading…</p> : !report ? (
           <p style={{ color: 'var(--text-secondary)' }}>Couldn't load the report.</p>
         ) : report.total === 0 ? (
           <p style={{ color: 'var(--text-secondary)' }}>No shipments in this range.</p>
         ) : (
           <>
-            {/* Period totals by state — the billing figures */}
+            {/* Period total header — shared by both views */}
             <div style={{ background: 'var(--bg-color)', borderRadius: 'var(--radius-md)', padding: '0.6rem 0.75rem', marginBottom: '0.9rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, marginBottom: '0.35rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, marginBottom: tab === 'state' ? '0.35rem' : 0 }}>
                 <span>Period total</span><span>{report.total} shipped</span>
               </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem' }}>
-                {totals.map(([st, n]) => <span key={st} className="badge badge-primary" style={{ fontSize: '0.75rem' }}>{st}: {n}</span>)}
-              </div>
+              {tab === 'state' && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem' }}>
+                  {totals.map(([st, n]) => <span key={st} className="badge badge-primary" style={{ fontSize: '0.75rem' }}>{st}: {n}</span>)}
+                </div>
+              )}
             </div>
 
-            {report.days.map((d) => (
+            {tab === 'state' ? report.days.map((d) => (
               <div key={d.day} style={{ padding: '0.55rem 0', borderBottom: '1px solid var(--border-color)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <strong>{istDateLabel(d.day)}</strong>
@@ -483,6 +491,20 @@ const ShipmentReportModal = ({ report, loading, from, to, onFrom, onTo, onClose 
                 </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem', marginTop: '0.4rem' }}>
                   {Object.entries(d.states).sort((a, b) => b[1] - a[1]).map(([st, n]) => (
+                    <span key={st} className="badge badge-gray" style={{ fontSize: '0.72rem' }}>{st}: {n}</span>
+                  ))}
+                </div>
+              </div>
+            )) : (report.products || []).map((p, i) => (
+              <div key={p.product + '|' + p.nickname + i} style={{ padding: '0.55rem 0', borderBottom: '1px solid var(--border-color)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
+                  <strong style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {p.product}{p.nickname && p.nickname !== p.product ? <span style={{ color: 'var(--text-secondary)', fontWeight: 400 }}> ({p.nickname})</span> : null}
+                  </strong>
+                  <span className="badge badge-completed" style={{ whiteSpace: 'nowrap' }}>{p.total} shipped</span>
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem', marginTop: '0.4rem' }}>
+                  {Object.entries(p.states).sort((a, b) => b[1] - a[1]).map(([st, n]) => (
                     <span key={st} className="badge badge-gray" style={{ fontSize: '0.72rem' }}>{st}: {n}</span>
                   ))}
                 </div>

@@ -41,25 +41,26 @@ function action_listProducts_(payload, ctx) {
 }
 
 // The sender block lives on a referenced SenderAddress (resolved live here) so
-// editing an address flows through to every product using it. Older products
-// store the sender fields inline; we fall back to those when no address is set.
+// editing an address flows through to every product using it.
 function productFromRow_(r, addrById) {
   var addrId = r.sender_address_id ? String(r.sender_address_id) : '';
   var a = (addrId && addrById) ? addrById[addrId] : null;
   return {
     productId: r.product_id,
-    productCode: r.product_code || '',
     name: r.name,
+    // Internal owner tag (e.g. "Perfumaina - Nihal") — used in reports/pickers,
+    // never printed on the label.
+    nickname: r.nickname || '',
     hubCustomerCode: r.hub_customer_code || '',
     senderAddressId: addrId,
-    senderName: a ? a.senderName : (r.sender_name || ''),
-    senderPhone: a ? a.senderPhone : String(r.sender_phone || ''),
-    senderAddr1: a ? a.senderAddr1 : (r.sender_addr1 || ''),
-    senderAddr2: a ? a.senderAddr2 : (r.sender_addr2 || ''),
-    senderCity: a ? a.senderCity : (r.sender_city || ''),
-    senderState: a ? a.senderState : (r.sender_state || ''),
-    senderPincode: a ? a.senderPincode : String(r.sender_pincode || ''),
-    senderEmail: a ? a.senderEmail : (r.sender_email || ''),
+    senderName: a ? a.senderName : '',
+    senderPhone: a ? a.senderPhone : '',
+    senderAddr1: a ? a.senderAddr1 : '',
+    senderAddr2: a ? a.senderAddr2 : '',
+    senderCity: a ? a.senderCity : '',
+    senderState: a ? a.senderState : '',
+    senderPincode: a ? a.senderPincode : '',
+    senderEmail: a ? a.senderEmail : '',
     content: r.content || 'OTHERS',
     description: r.description || r.name,
     declaredValue: Number(r.declared_value) || 0,
@@ -73,19 +74,14 @@ function productFromRow_(r, addrById) {
     // Approval workflow: blank/legacy rows count as verified; new member-added
     // products start 'pending' until an admin/superadmin verifies them.
     status: r.status ? String(r.status) : 'verified',
-    createdBy: r.created_by || '',
-    verifiedBy: r.verified_by || '',
-    verifiedAt: r.verified_at ? String(r.verified_at) : '',
   };
 }
 
-/** camelCase product field -> sheet column. Shared by add/update. */
+/** camelCase product field -> sheet column. Shared by add/update. The sender
+ *  block is NOT stored here — it's resolved live from the referenced address. */
 var PRODUCT_COLMAP = {
-  productCode: 'product_code', name: 'name', hubCustomerCode: 'hub_customer_code',
-  senderAddressId: 'sender_address_id',
-  senderName: 'sender_name', senderPhone: 'sender_phone', senderAddr1: 'sender_addr1',
-  senderAddr2: 'sender_addr2', senderCity: 'sender_city', senderState: 'sender_state',
-  senderPincode: 'sender_pincode', senderEmail: 'sender_email', content: 'content',
+  name: 'name', nickname: 'nickname', hubCustomerCode: 'hub_customer_code',
+  senderAddressId: 'sender_address_id', content: 'content',
   description: 'description', declaredValue: 'declared_value', weightG: 'weight_g',
   lengthCm: 'length_cm', widthCm: 'width_cm', heightCm: 'height_cm',
   variants: 'variants',
@@ -114,11 +110,15 @@ function canManageProducts_(ctx) {
   return ctx.role === 'member' || isAdmin_(ctx);
 }
 
-/** Auto-generate a short, unique-ish internal product code from the name. */
-function generateProductCode_(sheet, name) {
-  var slug = String(name || 'PROD').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6) || 'PROD';
-  var n = readObjects_(sheet).rows.length + 1;
-  return slug + '-' + ('000' + n).slice(-3);
+/** True if another product (not excludeId) already uses this nick name. The
+ *  nick name is the report's owner tag, so it must be unique per customer. */
+function productNicknameTaken_(rows, nickname, excludeId) {
+  var nn = String(nickname || '').trim().toLowerCase();
+  if (!nn) return false;
+  return rows.some(function (r) {
+    return String(r.product_id) !== String(excludeId || '') &&
+           String(r.nickname || '').trim().toLowerCase() === nn;
+  });
 }
 
 function action_addProduct_(payload, ctx) {
@@ -127,23 +127,26 @@ function action_addProduct_(payload, ctx) {
   if (c.error) return c.error;
   var p = normalizeProductPayload_(payload.product || {});
   if (!p.name) return badRequest_('product.name is required');
-  if (!p.senderAddressId && !p.senderName) return badRequest_('a sender address is required');
+  if (!p.nickname || !String(p.nickname).trim()) return badRequest_('product.nickname is required');
+  if (!p.senderAddressId) return badRequest_('a sender address is required');
 
   var ss = getCustomerSpreadsheet_(c.id);
   var sheet = ensureColumns_(getSheetOrThrow_(ss, SHEETS.PRODUCTS), productColumns_());
+  if (productNicknameTaken_(readObjects_(sheet).rows, p.nickname, null)) {
+    return badRequest_('That nick name is already used by another product.');
+  }
   var productId = Utilities.getUuid();
   var row = { product_id: productId, created_at: nowIso_(), created_by: ctx.email };
   Object.keys(PRODUCT_COLMAP).forEach(function (k) {
     if (p[k] !== undefined) row[PRODUCT_COLMAP[k]] = p[k];
   });
-  if (!row.product_code) row.product_code = generateProductCode_(sheet, p.name); // auto, hidden from UI
   if (!row.description) row.description = p.name;
   if (!row.content) row.content = 'OTHERS';
   // Managers auto-verify their own products; members create as pending.
   if (isAdmin_(ctx)) { row.status = 'verified'; row.verified_by = ctx.email; row.verified_at = nowIso_(); }
   else { row.status = 'pending'; }
   appendRowObjects_(sheet, [row]);
-  return { ok: true, productId: productId, productCode: row.product_code, status: row.status };
+  return { ok: true, productId: productId, status: row.status };
 }
 
 function action_updateProduct_(payload, ctx) {
@@ -158,6 +161,12 @@ function action_updateProduct_(payload, ctx) {
   var data = readObjects_(sheet);
   var row = data.rows.find(function (r) { return String(r.product_id) === String(productId); });
   if (!row) return { ok: false, error: 'NOT_FOUND' };
+  if (p.nickname !== undefined) {
+    if (!String(p.nickname).trim()) return badRequest_('product.nickname is required');
+    if (productNicknameTaken_(data.rows, p.nickname, productId)) {
+      return badRequest_('That nick name is already used by another product.');
+    }
+  }
   var setCell = function (name, val) { var col = data.headers.indexOf(name) + 1; if (col > 0) sheet.getRange(row._row, col).setValue(val); };
 
   // Compare a new value against the stored one, treating blank as 0 for numbers
@@ -176,17 +185,18 @@ function action_updateProduct_(payload, ctx) {
     var colName = PRODUCT_COLMAP[k];
     var col = data.headers.indexOf(colName) + 1;
     if (col < 1) return;
-    // Only a change to a shipping field (anything but the variant labels) forces
-    // a member's product back to pending — variants share one shipping profile.
-    if (k !== 'variants' && !eq_(row[colName], p[k])) shippingChanged = true;
+    // Only a change to a real shipping field forces a member's product back to
+    // pending. Variant labels and the nick name don't affect the parcel, so
+    // editing just those keeps the product verified.
+    if (k !== 'variants' && k !== 'nickname' && !eq_(row[colName], p[k])) shippingChanged = true;
     sheet.getRange(row._row, col).setValue(p[k]);
     changed++;
   });
   // Re-verification policy on edit:
   //  • admin/superadmin edits stay verified;
   //  • a member edit that touched a shipping field goes back to pending;
-  //  • a member edit that changed ONLY the variant labels keeps its current
-  //    status — the parcel is identical, so no admin re-approval is needed.
+  //  • a member edit that changed ONLY the variant labels or nick name keeps its
+  //    current status — the parcel is identical, so no admin re-approval is needed.
   if (isAdmin_(ctx)) { setCell('status', 'verified'); setCell('verified_by', ctx.email); setCell('verified_at', nowIso_()); }
   else if (shippingChanged) { setCell('status', 'pending'); setCell('verified_by', ''); setCell('verified_at', ''); }
   SpreadsheetApp.flush();

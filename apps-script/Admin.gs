@@ -92,7 +92,7 @@ function action_createCustomer_(payload, ctx) {
 
 function seedCustomerSpreadsheet_(ss) {
   var specs = [
-    [SHEETS.PRODUCTS, ['product_id', 'product_code', 'name', 'hub_customer_code', 'sender_address_id', 'sender_name', 'sender_phone', 'sender_addr1', 'sender_addr2', 'sender_city', 'sender_state', 'sender_pincode', 'sender_email', 'content', 'description', 'declared_value', 'weight_g', 'length_cm', 'width_cm', 'height_cm', 'variants', 'created_at']],
+    [SHEETS.PRODUCTS, ['product_id', 'name', 'nickname', 'hub_customer_code', 'sender_address_id', 'content', 'description', 'declared_value', 'weight_g', 'length_cm', 'width_cm', 'height_cm', 'variants', 'created_at', 'status', 'created_by', 'verified_by', 'verified_at']],
     [SHEETS.ADDRESSES, ['address_id', 'label', 'sender_name', 'sender_phone', 'sender_addr1', 'sender_addr2', 'sender_city', 'sender_state', 'sender_pincode', 'sender_email', 'created_at']],
     [SHEETS.RANGES, ['seq', 'prefix', 'start', 'end', 'pad', 'cursor', 'status']],
     [SHEETS.ORDERS, ['order_id', 'batch_id', 'client_order_id', 'tracking_id', 'product_id', 'extra_product_ids', 'variant', 'extra_variants', 'receiver_name', 'receiver_phone', 'receiver_pincode', 'receiver_line1', 'receiver_line2', 'receiver_state', 'status', 'operator_email', 'created_at', 'manifest_id', 'shipped_at', 'exported_at', 'export_id', 'voided_at', 'voided_by']],
@@ -106,6 +106,36 @@ function seedCustomerSpreadsheet_(ss) {
   });
   var def = ss.getSheetByName('Sheet1');
   if (def) ss.deleteSheet(def);
+}
+
+/**
+ * ONE-TIME maintenance — run manually from the Apps Script editor (pick
+ * `resetProductsSheets` in the function dropdown → Run). Rewrites every
+ * customer's Products sheet to the current clean schema: exact new headers,
+ * dropped legacy columns removed, and NO data rows. Safe only while there is no
+ * real product data (it wipes existing products). Returns a per-customer summary
+ * (also written to the execution log).
+ */
+function resetProductsSheets() {
+  var dir = getDirectorySpreadsheet_();
+  var custs = readObjects_(getSheetOrThrow_(dir, SHEETS.CUSTOMERS)).rows;
+  var headers = productColumns_();
+  var out = [];
+  custs.forEach(function (c) {
+    if (!c.spreadsheet_id) return;
+    var ss;
+    try { ss = SpreadsheetApp.openById(String(c.spreadsheet_id)); }
+    catch (e) { out.push(c.customer_id + ': cannot open spreadsheet'); return; }
+    var sh = ss.getSheetByName(SHEETS.PRODUCTS) || ss.insertSheet(SHEETS.PRODUCTS);
+    sh.clear();                                                 // wipe old headers + rows
+    sh.getRange(1, 1, 1, headers.length).setValues([headers]);  // write the clean schema
+    var extra = sh.getMaxColumns() - headers.length;
+    if (extra > 0) sh.deleteColumns(headers.length + 1, extra); // drop leftover blank columns
+    sh.setFrozenRows(1);
+    out.push(c.customer_id + ': reset (' + headers.length + ' cols, 0 rows)');
+  });
+  Logger.log(out.join('\n'));
+  return out;
 }
 
 /* ----------------------------- hub codes ------------------------------- */

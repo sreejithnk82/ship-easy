@@ -159,9 +159,11 @@ function action_listOrders_(payload, ctx) {
 
 /**
  * Per-day, state-wise SHIPPED report for one customer — the billing source of
- * truth (state charges differ). Reads the Orders sheet directly, so it's
- * accurate across every device/operator. Any scanner may run it for their
- * customer (admins for any). Optional fromDay/toDay are IST "yyyy-mm-dd".
+ * truth (state charges differ). Also returns a per-product breakdown (each
+ * product with its owner nick name + state split) for the "By product" view.
+ * Reads the Orders sheet directly, so it's accurate across every device/operator.
+ * Any scanner may run it for their customer (admins for any). Optional
+ * fromDay/toDay are IST "yyyy-mm-dd".
  */
 function action_shipmentReport_(payload, ctx) {
   if (!canScan_(ctx)) return forbidden_();
@@ -170,8 +172,18 @@ function action_shipmentReport_(payload, ctx) {
   var fromDay = payload.fromDay ? String(payload.fromDay) : '';
   var toDay = payload.toDay ? String(payload.toDay) : '';
 
-  var rows = readObjects_(getSheetOrThrow_(getCustomerSpreadsheet_(c.id), SHEETS.ORDERS)).rows;
+  var ss = getCustomerSpreadsheet_(c.id);
+  var rows = readObjects_(getSheetOrThrow_(ss, SHEETS.ORDERS)).rows;
+
+  // Orders store only product_id, so map it -> { name, nickname } for the
+  // per-product view (the nick name is the owner tag shown in the report).
+  var prodById = {};
+  readObjects_(getSheetOrThrow_(ss, SHEETS.PRODUCTS)).rows.forEach(function (pr) {
+    prodById[String(pr.product_id)] = { name: String(pr.name || ''), nickname: String(pr.nickname || '') };
+  });
+
   var byDay = {};
+  var byProduct = {};                                // keyed by PRIMARY product_id
   rows.forEach(function (r) {
     if (String(r.status) !== 'shipped') return;
     var ts = String(r.shipped_at || r.created_at || '');
@@ -180,9 +192,19 @@ function action_shipmentReport_(payload, ctx) {
     if (fromDay && day < fromDay) return;            // yyyy-mm-dd sorts lexicographically
     if (toDay && day > toDay) return;
     var st = String(r.receiver_state || '').trim() || '—';
+
     if (!byDay[day]) byDay[day] = { day: day, total: 0, states: {} };
     byDay[day].total += 1;
     byDay[day].states[st] = (byDay[day].states[st] || 0) + 1;
+
+    // Per product — primary product only, so one count per parcel (extras ignored).
+    var pid = String(r.product_id || '');
+    if (!byProduct[pid]) {
+      var meta = prodById[pid] || { name: '', nickname: '' };
+      byProduct[pid] = { product: meta.name || pid, nickname: meta.nickname || meta.name || pid, total: 0, states: {} };
+    }
+    byProduct[pid].total += 1;
+    byProduct[pid].states[st] = (byProduct[pid].states[st] || 0) + 1;
   });
 
   var days = Object.keys(byDay).sort().reverse().map(function (d) { return byDay[d]; });
@@ -192,7 +214,9 @@ function action_shipmentReport_(payload, ctx) {
     grand += d.total;
     Object.keys(d.states).forEach(function (st) { totals[st] = (totals[st] || 0) + d.states[st]; });
   });
-  return { ok: true, days: days, totals: totals, total: grand };
+  var products = Object.keys(byProduct).map(function (pid) { return byProduct[pid]; })
+    .sort(function (a, b) { return b.total - a.total; });
+  return { ok: true, days: days, totals: totals, total: grand, products: products };
 }
 
 /* ------------------------------ balances ------------------------------ */
