@@ -92,7 +92,7 @@ function action_createCustomer_(payload, ctx) {
 
 function seedCustomerSpreadsheet_(ss) {
   var specs = [
-    [SHEETS.PRODUCTS, ['product_id', 'name', 'nickname', 'hub_customer_code', 'sender_address_id', 'content', 'description', 'declared_value', 'weight_g', 'length_cm', 'width_cm', 'height_cm', 'variants', 'created_at', 'status', 'created_by', 'verified_by', 'verified_at']],
+    [SHEETS.PRODUCTS, ['product_id', 'name', 'nickname', 'sender_address_id', 'content', 'description', 'declared_value', 'weight_g', 'length_cm', 'width_cm', 'height_cm', 'variants', 'created_at', 'status', 'created_by', 'verified_by', 'verified_at']],
     [SHEETS.ADDRESSES, ['address_id', 'label', 'sender_name', 'sender_phone', 'sender_addr1', 'sender_addr2', 'sender_city', 'sender_state', 'sender_pincode', 'sender_email', 'created_at']],
     [SHEETS.RANGES, ['seq', 'prefix', 'start', 'end', 'pad', 'cursor', 'status']],
     [SHEETS.ORDERS, ['order_id', 'batch_id', 'client_order_id', 'tracking_id', 'product_id', 'extra_product_ids', 'variant', 'extra_variants', 'receiver_name', 'receiver_phone', 'receiver_pincode', 'receiver_line1', 'receiver_line2', 'receiver_state', 'status', 'operator_email', 'created_at', 'manifest_id', 'shipped_at', 'exported_at', 'export_id', 'voided_at', 'voided_by']],

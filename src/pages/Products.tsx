@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Package, Save, Plus, X, Pencil, Trash2, MapPin, BadgeCheck, Clock, Tag } from 'lucide-react';
-import { api, Product, HubCode, SenderAddress } from '../lib/api';
+import { api, Product, SenderAddress } from '../lib/api';
 import { ApiError } from '../lib/api';
 import { useProfile, isAdmin } from '../lib/profile';
 import { useActiveCustomer } from '../lib/activeCustomer';
@@ -9,7 +9,7 @@ import { NEW_ADDRESS_KEY } from './Addresses';
 import { useToast, useConfirm } from '../components/feedback';
 
 const EMPTY = {
-  name: '', nickname: '', hubCustomerCode: '', senderAddressId: '',
+  name: '', nickname: '', senderAddressId: '',
   content: 'OTHERS', description: '', declaredValue: '',
   weightG: '', lengthCm: '', widthCm: '', heightCm: '',
   variants: '', // sub-type labels, comma/newline separated (e.g. "Red, Blue, 100ml")
@@ -38,7 +38,6 @@ export const Products = () => {
   const notify = useToast();
   const confirm = useConfirm();
   const [products, setProducts] = useState<Product[]>([]);
-  const [hubCodes, setHubCodes] = useState<HubCode[]>([]);
   const [addresses, setAddresses] = useState<SenderAddress[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -67,10 +66,10 @@ export const Products = () => {
   const load = async () => {
     setLoading(true);
     try {
-      const [{ products }, { hubCodes }, { addresses }] = await Promise.all([
-        api.listProducts(customerId), api.listHubCodes(), api.listSenderAddresses(customerId),
+      const [{ products }, { addresses }] = await Promise.all([
+        api.listProducts(customerId), api.listSenderAddresses(customerId),
       ]);
-      setProducts(products); setHubCodes(hubCodes); setAddresses(addresses);
+      setProducts(products); setAddresses(addresses);
     } catch (e: any) {
       notify('Failed to load: ' + e.message, 'error');
     } finally {
@@ -79,11 +78,9 @@ export const Products = () => {
   };
 
   const openNew = () => {
-    const c = profile?.customer;
     setEditingId(null);
     setForm({
       ...EMPTY,
-      hubCustomerCode: c?.hubCustomerCode || '',
       senderAddressId: addresses.length === 1 ? addresses[0].addressId : '',
     });
     setShowForm(true);
@@ -92,7 +89,7 @@ export const Products = () => {
   const startEdit = (p: Product) => {
     setEditingId(p.productId);
     setForm({
-      name: p.name, nickname: p.nickname || '', hubCustomerCode: p.hubCustomerCode, senderAddressId: p.senderAddressId || '',
+      name: p.name, nickname: p.nickname || '', senderAddressId: p.senderAddressId || '',
       content: p.content || 'OTHERS', description: p.description, declaredValue: String(p.declaredValue),
       weightG: String(p.weightG), lengthCm: String(p.lengthCm), widthCm: String(p.widthCm), heightCm: String(p.heightCm),
       variants: (p.variants || []).join(', '),
@@ -124,7 +121,7 @@ export const Products = () => {
     }
     setSaving(true);
     const payload = {
-      name: form.name, nickname: form.nickname.trim(), hubCustomerCode: form.hubCustomerCode, senderAddressId: form.senderAddressId,
+      name: form.name, nickname: form.nickname.trim(), senderAddressId: form.senderAddressId,
       content: form.content || 'OTHERS', description: form.description || form.name,
       declaredValue: Number(form.declaredValue) || 0,
       weightG: Number(form.weightG), lengthCm: Number(form.lengthCm) || 0,
@@ -204,13 +201,6 @@ export const Products = () => {
                 <option value={ADD_NEW}>+ Add new address…</option>
               </select>
             </div>
-            <div className="input-group" style={{ margin: 0 }}>
-              <label className="input-label">Hub Customer Code</label>
-              <select className="input-field" value={form.hubCustomerCode} onChange={(e) => set('hubCustomerCode')(e.target.value)}>
-                <option value="">— choose —</option>
-                {hubCodes.map((h) => <option key={h.code} value={h.code}>{h.code}{h.label ? ` (${h.label})` : ''}</option>)}
-              </select>
-            </div>
             <F label="Content" v={form.content} on={set('content')} ph="OTHERS / PERFUMES / CLOTHING" />
             <F label="Description" v={form.description} on={set('description')} ph="DTDC item text e.g. MOBILE CASE" />
             <F label="Declared Value (₹)" type="number" v={form.declaredValue} on={set('declaredValue')} />
@@ -272,7 +262,7 @@ export const Products = () => {
                   <Tag size={12} /> {p.nickname}
                 </div>
               )}
-              <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>{p.senderName} · {p.hubCustomerCode}</div>
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>{p.senderName}</div>
               <p style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--primary-color)', margin: '0 0 1rem 0' }}>₹{p.declaredValue}</p>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
                 {p.status === 'pending'

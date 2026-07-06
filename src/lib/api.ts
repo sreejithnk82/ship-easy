@@ -73,7 +73,6 @@ export interface Product {
   productId: string;
   name: string;
   nickname: string;       // internal owner tag (e.g. "Perfumaina - Nihal") — reports/pickers, never printed
-  hubCustomerCode: string;
   senderAddressId: string;
   // Sender block is resolved live from the referenced address (read-only here).
   senderName: string; senderPhone: string; senderAddr1: string; senderAddr2: string;
@@ -151,7 +150,7 @@ export const api = {
   generateLabels: (customerId: string, idempotencyKey: string, orders: OrderInput[]) =>
     callApi<{ batchId: string; count: number; assignments: Assignment[] }>(
       'generateLabels', { customerId, idempotencyKey, orders }),
-  listOpenOrders: (customerId: string) => callApi<{ orders: OpenOrder[] }>('listOpenOrders', { customerId }),
+  listOpenOrders: (customerId: string) => callApi<{ orders: OpenOrder[]; hubCustomerCode: string }>('listOpenOrders', { customerId }),
   updateOrder: (
     customerId: string,
     key: { orderId?: string; trackingId?: string },

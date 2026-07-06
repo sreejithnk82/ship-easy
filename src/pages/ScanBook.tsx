@@ -22,6 +22,7 @@ export const ScanBook = () => {
 
   const [openMap, setOpenMap] = useState<Map<string, OpenOrder>>(new Map());
   const [products, setProducts] = useState<Product[]>([]);
+  const [hubCode, setHubCode] = useState('');   // customer-level DTDC Hub Customer Code
   const [scanned, setScanned] = useState<OpenOrder[]>([]);
   const [code, setCode] = useState('');
   const [flash, setFlash] = useState<Flash>(null);
@@ -86,13 +87,14 @@ export const ScanBook = () => {
     setLoading(true);
     hydratedRef.current = false;
     try {
-      const [{ orders }, { products }] = await Promise.all([
+      const [{ orders, hubCustomerCode }, { products }] = await Promise.all([
         api.listOpenOrders(customerId),
         api.listProducts(customerId),
       ]);
       const map = new Map(orders.map((o) => [String(o.trackingId), o] as [string, OpenOrder]));
       setOpenMap(map);
       setProducts(products);
+      setHubCode(hubCustomerCode || '');
       // Restore the in-progress scan from local storage, re-hydrating from the
       // fresh open orders (drops anything no longer open — already shipped, etc.).
       let saved: string[] = [];
@@ -242,7 +244,7 @@ export const ScanBook = () => {
       receiverPincode: s.receiverPincode, receiverLine1: s.receiverLine1,
       receiverLine2: s.receiverLine2, receiverState: s.receiverState,
     }));
-    downloadDtdc(rows, products);
+    downloadDtdc(rows, products, hubCode);
   };
 
   const markShipped = async () => {

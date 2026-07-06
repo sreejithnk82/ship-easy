@@ -48,9 +48,10 @@ export interface DtdcOrder {
  * One DTDC row (array in DTDC_HEADERS order). A parcel can carry several products
  * (one label): weight + declared value are SUMMED across them, the package
  * dimensions are the LARGEST product's box (by volume), and the description lists
- * all items. Sender / hub / content come from the primary (first) product.
+ * all items. Sender & content come from the primary (first) product; the Hub
+ * Customer Code is a customer-level account field, passed in.
  */
-export function buildDtdcRow(order: DtdcOrder, byId: Map<string, Product>): (string | number)[] {
+export function buildDtdcRow(order: DtdcOrder, byId: Map<string, Product>, hubCustomerCode: string): (string | number)[] {
   // Pair each product id with its chosen variant label, keeping index alignment
   // (primary first), then resolve products and drop any that no longer exist.
   const rawIds = [order.productId, ...(order.extraProductIds || [])];
@@ -109,7 +110,7 @@ export function buildDtdcRow(order: DtdcOrder, byId: Map<string, Product>): (str
     '',                                             // AB Receiver's City
     state,                                          // AC Receiver's State
     '',                                             // AD Receiver's Email
-    p?.hubCustomerCode || '',                       // AE Hub Customer Code
+    hubCustomerCode || '',                          // AE Hub Customer Code (customer-level)
     '', '', '', '',                                 // AF–AI VAS Product/Mode/Favor/Amount
     '',                                             // AJ Consignment Type
     '', '',                                         // AK–AL Origin/Destination W3W
@@ -119,10 +120,10 @@ export function buildDtdcRow(order: DtdcOrder, byId: Map<string, Product>): (str
 }
 
 /** Build the workbook (header row + one row per order) as an .xlsx Blob. */
-export function buildDtdcWorkbook(orders: DtdcOrder[], products: Product[]): Blob {
+export function buildDtdcWorkbook(orders: DtdcOrder[], products: Product[], hubCustomerCode: string): Blob {
   const byId = new Map(products.map((p) => [p.productId, p]));
   const aoa: (string | number)[][] = [DTDC_HEADERS];
-  orders.forEach((o) => aoa.push(buildDtdcRow(o, byId)));
+  orders.forEach((o) => aoa.push(buildDtdcRow(o, byId, hubCustomerCode)));
 
   const ws = XLSX.utils.aoa_to_sheet(aoa);
   const wb = XLSX.utils.book_new();
@@ -134,8 +135,8 @@ export function buildDtdcWorkbook(orders: DtdcOrder[], products: Product[]): Blo
 }
 
 /** Trigger a browser download of the DTDC workbook. */
-export function downloadDtdc(orders: DtdcOrder[], products: Product[], filename?: string) {
-  const blob = buildDtdcWorkbook(orders, products);
+export function downloadDtdc(orders: DtdcOrder[], products: Product[], hubCustomerCode: string, filename?: string) {
+  const blob = buildDtdcWorkbook(orders, products, hubCustomerCode);
   const name = filename || `ScannedItems_${istDayKey(new Date()).replace(/-/g, '')}.xlsx`;
   triggerDownload(blob, name);
 }

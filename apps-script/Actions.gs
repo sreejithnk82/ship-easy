@@ -51,7 +51,6 @@ function productFromRow_(r, addrById) {
     // Internal owner tag (e.g. "Perfumaina - Nihal") — used in reports/pickers,
     // never printed on the label.
     nickname: r.nickname || '',
-    hubCustomerCode: r.hub_customer_code || '',
     senderAddressId: addrId,
     senderName: a ? a.senderName : '',
     senderPhone: a ? a.senderPhone : '',
@@ -80,7 +79,7 @@ function productFromRow_(r, addrById) {
 /** camelCase product field -> sheet column. Shared by add/update. The sender
  *  block is NOT stored here — it's resolved live from the referenced address. */
 var PRODUCT_COLMAP = {
-  name: 'name', nickname: 'nickname', hubCustomerCode: 'hub_customer_code',
+  name: 'name', nickname: 'nickname',
   senderAddressId: 'sender_address_id', content: 'content',
   description: 'description', declaredValue: 'declared_value', weightG: 'weight_g',
   lengthCm: 'length_cm', widthCm: 'width_cm', heightCm: 'height_cm',
@@ -385,7 +384,9 @@ function action_listOpenOrders_(payload, ctx) {
         exportedAt: r.exported_at ? String(r.exported_at) : '',
       };
     });
-  return { ok: true, orders: open };
+  // The DTDC "Hub Customer Code" is a customer-level account field (not per
+  // product), so hand it to the scan screen for the export.
+  return { ok: true, orders: open, hubCustomerCode: String(getCustomerRecord_(c.id).hub_customer_code || '') };
 }
 
 /** Mark a set of scanned tracking IDs shipped + record a manifest. */
