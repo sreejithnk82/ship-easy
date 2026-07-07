@@ -206,7 +206,13 @@ const App = () => {
       <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Acting as group:</span>
       <select className="input-field" value={activeId} onChange={(e) => setActiveId(e.target.value)} style={{ maxWidth: 320, width: 'auto', flex: 1 }}>
         <option value="">— select a group —</option>
-        {customers.map((c) => <option key={c.customerId} value={c.customerId}>{c.name} ({c.customerId})</option>)}
+        {customers.map((c) => (
+          // A customer with a blank customer_id is unusable — disable it (and force
+          // value="" so a valueless <option> can't leak its label text as the id).
+          <option key={c.customerId || c.name} value={c.customerId || ''} disabled={!c.customerId}>
+            {c.name} ({c.customerId || 'NO ID — fix in Customers sheet'})
+          </option>
+        ))}
       </select>
     </div>
   ) : null;

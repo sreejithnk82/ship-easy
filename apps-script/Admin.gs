@@ -177,7 +177,10 @@ function action_listServiceablePincodes_(payload, ctx) {
   var rows = readObjects_(sh).rows;
   var pincodes = [];
   rows.forEach(function (r) {
-    var p = String(r.pincode == null ? '' : r.pincode).replace(/\D/g, '');
+    // Tolerate cells Sheets auto-formatted as currency/number ("$110,001.00"):
+    // drop any decimal part FIRST, then strip non-digits, so we still recover the
+    // real 6-digit pin instead of "11000100".
+    var p = String(r.pincode == null ? '' : r.pincode).split('.')[0].replace(/\D/g, '');
     if (p.length === 6) pincodes.push(p);
   });
   return { ok: true, pincodes: pincodes };
