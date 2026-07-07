@@ -10,8 +10,9 @@
 // (name + variant), receiver name, pincode, phone. Sender is name-only (dropped
 // on tiny labels); receiver address is shown only where there's room. Roomy
 // sizes carry TWO identical barcodes (a backup scan target); tiny sizes keep one.
-//   • portrait  (w/h < 1.15, incl. squares)
-//   • landscape (w/h ≥ 1.15) — receiver left, barcode + big product list right
+//   • portrait  (w/h < 1.15, incl. squares) — two stacked barcodes, full-width bands
+//   • wide      (w/h ≥ 1.15, e.g. 4×3, A4 2-up) — SINGLE column: barcode on top,
+//                then items, ship-to, pincode. No side-by-side columns.
 //   • minimal   (min side < 150pt) — barcode, products, name, pincode, phone
 
 import type { LabelFields } from './labelModel';
@@ -30,7 +31,7 @@ const GREY = '#64748b';
 
 export function computeLabelLayout(w: number, h: number, f: LabelFields): LabelPrimitive[] {
   if (Math.min(w, h) < 150) return minimalLayout(w, h, f);
-  if (w / h >= 1.15) return landscapeLayout(w, h, f);
+  if (w / h >= 1.15) return wideLayout(w, h, f);
   return portraitLayout(w, h, f);
 }
 
@@ -88,37 +89,42 @@ function portraitLayout(w: number, h: number, f: LabelFields): LabelPrimitive[] 
   return p;
 }
 
-function landscapeLayout(w: number, h: number, f: LabelFields): LabelPrimitive[] {
+// Wide cells (4×3, A4 2-up). SINGLE column that flows top→bottom like a normal
+// shipping label — NOT split into two side-by-side columns. Fraction-based, so
+// the same proportions hold for a small 4×3 and a large A4 half-sheet.
+function wideLayout(w: number, h: number, f: LabelFields): LabelPrimitive[] {
   const p = frame(w, h);
   const T = makeText(p);
-  const pad = Math.min(w, h) * 0.06;
+  const pad = Math.min(w, h) * 0.055;
+  const x = pad, iw = w - 2 * pad, cx = w / 2;
   const lw = Math.max(0.3, h * 0.004);
-  const colX = w * 0.48;
-  const lx = pad, lW = colX - 2 * pad;
-  const rx = colX + pad, rW = w - rx - pad;
+  const rule = (yy: number) => p.push({ kind: 'line', x1: pad, y1: yy, x2: w - pad, y2: yy, lineW: lw });
 
-  T('DTDC', w - pad, h * 0.05, h * 0.075, 'bolditalic', 'right', { color: BLUE });
-  T('From: ' + f.fromName, lx, h * 0.05, h * 0.048, 'bold', 'left', { maxW: lW, maxLines: 1 });
-  p.push({ kind: 'line', x1: colX, y1: pad, x2: colX, y2: h - pad, lineW: lw });
+  // Header: DTDC + sender name (name only)
+  T('DTDC', w - pad, h * 0.03, h * 0.05, 'bolditalic', 'right', { color: BLUE });
+  T('From: ' + f.fromName, x, h * 0.035, h * 0.032, 'bold', 'left', { maxW: iw * 0.72, maxLines: 1 });
+  rule(h * 0.10);
 
-  // Left column: receiver (name / phone / address / big pincode)
-  T('Ship to:', lx, h * 0.14, h * 0.04, 'bold', 'left', { color: GREY });
-  T(f.toName, lx, h * 0.20, h * 0.075, 'bold', 'left', { maxW: lW, maxLines: 1 });
-  T('Ph: ' + f.phone, lx, h * 0.32, h * 0.05, 'normal', 'left', { maxLines: 1 });
-  T(f.addrLines.join('\n'), lx, h * 0.41, h * 0.046, 'normal', 'left', { maxW: lW, lineH: h * 0.056, maxLines: 2 });
-  T('PIN', lx, h * 0.64, h * 0.044, 'bold', 'left', { color: GREY });
-  T(f.pincode, lx, h * 0.685, h * 0.14, 'bold', 'left', { maxLines: 1 });
-  if (f.state) T(f.state, lx, h * 0.88, h * 0.05, 'bold', 'left', { maxW: lW, maxLines: 1 });
+  // One prominent, full-width, centered barcode + its tracking number
+  p.push({ kind: 'barcode', x: pad, y: h * 0.115, w: iw, h: h * 0.185, value: f.trackingId, align: 'center' });
+  T(f.trackingId, cx, h * 0.31, h * 0.045, 'bold', 'center', { maxLines: 1 });
+  rule(h * 0.37);
 
-  // Right column: TWO identical barcodes — a smaller right-aligned one, then the
-  // larger centered primary — then the items list.
-  const bar = (yy: number, hh: number, align: LabelAlign) => p.push({ kind: 'barcode', x: rx, y: yy, w: rW, h: hh, value: f.trackingId, align });
-  bar(h * 0.05, h * 0.11, 'right');
-  T(f.trackingId, w - pad, h * 0.17, h * 0.04, 'bold', 'right', { maxLines: 1 });
-  bar(h * 0.24, h * 0.15, 'center');
-  T(f.trackingId, rx + rW / 2, h * 0.40, h * 0.042, 'bold', 'center', { maxLines: 1 });
-  T('ITEMS', rx, h * 0.48, h * 0.04, 'bold', 'left', { color: GREY });
-  T(f.products.join('\n'), rx, h * 0.53, h * 0.05, 'bold', 'left', { maxW: rW, lineH: h * 0.062, maxLines: 3 });
+  // PRODUCTS — all items + variants
+  T('ITEMS', x, h * 0.385, h * 0.028, 'bold', 'left', { color: GREY });
+  T(f.products.join('\n'), x, h * 0.415, h * 0.042, 'bold', 'left', { maxW: iw, lineH: h * 0.05, maxLines: 2 });
+  rule(h * 0.53);
+
+  // SHIP TO — name / phone / address
+  T('Ship to:', x, h * 0.545, h * 0.026, 'bold', 'left', { color: GREY });
+  T(f.toName, x, h * 0.575, h * 0.055, 'bold', 'left', { maxW: iw, maxLines: 1 });
+  T('Ph: ' + f.phone, x, h * 0.645, h * 0.04, 'bold', 'left', { maxLines: 1 });
+  T(f.addrLines.join('\n'), x, h * 0.70, h * 0.032, 'normal', 'left', { maxW: iw, lineH: h * 0.038, maxLines: 2 });
+
+  // Destination pincode + state — bottom of the card
+  T('PIN', x, h * 0.80, h * 0.026, 'bold', 'left', { color: GREY });
+  T(f.pincode, x, h * 0.83, h * 0.095, 'bold', 'left', { maxLines: 1 });
+  if (f.state) T(f.state, w - pad, h * 0.85, h * 0.045, 'bold', 'right', { maxW: iw * 0.5, maxLines: 1 });
   return p;
 }
 

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { ScanLine, FileSpreadsheet, Truck, Check, AlertTriangle, X, Pencil, Ban, Camera, Keyboard, CalendarClock } from 'lucide-react';
+import { ScanLine, FileSpreadsheet, Truck, Check, AlertTriangle, X, Pencil, Ban, Camera, Keyboard, CalendarClock, Tag } from 'lucide-react';
 import { api, Product, OpenOrder, ShipmentReport } from '../lib/api';
 import { useProfile, isAdmin, canScan } from '../lib/profile';
 import { useToast, useConfirm } from '../components/feedback';
@@ -446,7 +446,7 @@ const ShipmentReportModal = ({ report, loading, from, to, onFrom, onTo, onClose 
   const totals = report ? Object.entries(report.totals).sort((a, b) => b[1] - a[1]) : [];
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 3000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1.25rem' }}>
-      <div onClick={(e) => e.stopPropagation()} className="glass-card slide-up modal-card" style={{ width: '100%', maxWidth: 480, background: 'white', maxHeight: '90vh', overflowY: 'auto' }}>
+      <div onClick={(e) => e.stopPropagation()} className="glass-card slide-up modal-card" style={{ width: '100%', maxWidth: 820, background: 'white', maxHeight: '90vh', overflowY: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
           <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}><CalendarClock size={20} /> Shipment report</h3>
           <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={22} /></button>
@@ -497,21 +497,37 @@ const ShipmentReportModal = ({ report, loading, from, to, onFrom, onTo, onClose 
                   ))}
                 </div>
               </div>
-            )) : (report.products || []).map((p, i) => (
-              <div key={p.product + '|' + p.nickname + i} style={{ padding: '0.55rem 0', borderBottom: '1px solid var(--border-color)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
-                  <strong style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {p.product}{p.nickname && p.nickname !== p.product ? <span style={{ color: 'var(--text-secondary)', fontWeight: 400 }}> ({p.nickname})</span> : null}
-                  </strong>
-                  <span className="badge badge-completed" style={{ whiteSpace: 'nowrap' }}>{p.total} shipped</span>
-                </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem', marginTop: '0.4rem' }}>
-                  {Object.entries(p.states).sort((a, b) => b[1] - a[1]).map(([st, n]) => (
-                    <span key={st} className="badge badge-gray" style={{ fontSize: '0.72rem' }}>{st}: {n}</span>
-                  ))}
-                </div>
+            )) : (
+              // One card per product — nick name + total + its state counts.
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '0.85rem' }}>
+                {(report.products || []).map((p, i) => (
+                  <div key={p.product + '|' + p.nickname + i} style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '0.85rem', background: 'var(--card-bg, white)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem' }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontWeight: 700, fontSize: '0.98rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.product}</div>
+                        {p.nickname && p.nickname !== p.product && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', color: 'var(--primary-color)', fontWeight: 600, fontSize: '0.78rem', marginTop: '0.15rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            <Tag size={12} /> {p.nickname}
+                          </div>
+                        )}
+                      </div>
+                      <div style={{ textAlign: 'right', whiteSpace: 'nowrap', color: 'var(--primary-color)', lineHeight: 1.1 }}>
+                        <span style={{ fontWeight: 800, fontSize: '1.4rem' }}>{p.total}</span>
+                        <div style={{ fontSize: '0.65rem', color: 'var(--text-secondary)' }}>shipped</div>
+                      </div>
+                    </div>
+                    <div style={{ marginTop: '0.6rem', borderTop: '1px dashed var(--border-color)', paddingTop: '0.55rem' }}>
+                      <div style={{ fontSize: '0.66rem', textTransform: 'uppercase', letterSpacing: '0.03em', color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>By state</div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem' }}>
+                        {Object.entries(p.states).sort((a, b) => b[1] - a[1]).map(([st, n]) => (
+                          <span key={st} className="badge badge-primary" style={{ fontSize: '0.72rem' }}>{st}: {n}</span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
-            ))}
+            )}
           </>
         )}
       </div>
