@@ -436,14 +436,13 @@ function countBy<T>(arr: T[], key: (t: T) => string): Record<string, number> {
   return arr.reduce((acc, x) => { const k = key(x); acc[k] = (acc[k] || 0) + 1; return acc; }, {} as Record<string, number>);
 }
 
-// Server-backed, per-day, state-wise SHIPPED report for the current customer —
-// the billing source of truth (state charges differ). Accurate across devices.
+// Server-backed, group-wise SHIPPED report over a date range: each customer GROUP
+// with shipments → its products (by nick name) → total + per-state counts. A
+// superadmin spans every group; a scoped user sees only their own.
 const ShipmentReportModal = ({ report, loading, from, to, onFrom, onTo, onClose }: {
   report: ShipmentReport | null; loading: boolean; from: string; to: string;
   onFrom: (v: string) => void; onTo: (v: string) => void; onClose: () => void;
 }) => {
-  const [tab, setTab] = useState<'state' | 'product'>('state');
-  const totals = report ? Object.entries(report.totals).sort((a, b) => b[1] - a[1]) : [];
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 3000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1.25rem' }}>
       <div onClick={(e) => e.stopPropagation()} className="glass-card slide-up modal-card" style={{ width: '100%', maxWidth: 820, background: 'white', maxHeight: '90vh', overflowY: 'auto' }}>
@@ -451,9 +450,9 @@ const ShipmentReportModal = ({ report, loading, from, to, onFrom, onTo, onClose 
           <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}><CalendarClock size={20} /> Shipment report</h3>
           <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={22} /></button>
         </div>
-        <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: '0 0 0.6rem' }}>Shipped parcels (IST) — by state for billing, or by product.</p>
+        <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: '0 0 0.6rem' }}>Shipped parcels (IST) — by group → product → state.</p>
 
-        <div style={{ display: 'flex', gap: '0.6rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: '0.6rem', marginBottom: '0.85rem', flexWrap: 'wrap' }}>
           <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>From
             <input type="date" className="input-field" value={from} max={to} onChange={(e) => onFrom(e.target.value)} style={{ marginTop: '0.15rem' }} />
           </label>
@@ -462,72 +461,54 @@ const ShipmentReportModal = ({ report, loading, from, to, onFrom, onTo, onClose 
           </label>
         </div>
 
-        <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.85rem' }}>
-          <button className={`btn ${tab === 'state' ? 'btn-primary' : 'btn-outline'}`} style={{ flex: 1, padding: '0.4rem' }} onClick={() => setTab('state')}>By state</button>
-          <button className={`btn ${tab === 'product' ? 'btn-primary' : 'btn-outline'}`} style={{ flex: 1, padding: '0.4rem' }} onClick={() => setTab('product')}>By product</button>
-        </div>
-
         {loading ? <p style={{ color: 'var(--text-secondary)' }}>Loading…</p> : !report ? (
           <p style={{ color: 'var(--text-secondary)' }}>Couldn't load the report.</p>
         ) : report.total === 0 ? (
           <p style={{ color: 'var(--text-secondary)' }}>No shipments in this range.</p>
         ) : (
           <>
-            {/* Period total header — shared by both views */}
-            <div style={{ background: 'var(--bg-color)', borderRadius: 'var(--radius-md)', padding: '0.6rem 0.75rem', marginBottom: '0.9rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, marginBottom: tab === 'state' ? '0.35rem' : 0 }}>
-                <span>Period total</span><span>{report.total} shipped</span>
-              </div>
-              {tab === 'state' && (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem' }}>
-                  {totals.map(([st, n]) => <span key={st} className="badge badge-primary" style={{ fontSize: '0.75rem' }}>{st}: {n}</span>)}
-                </div>
-              )}
+            <div style={{ background: 'var(--bg-color)', borderRadius: 'var(--radius-md)', padding: '0.6rem 0.75rem', marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', fontWeight: 700 }}>
+              <span>Total{report.groups.length > 1 ? ` · ${report.groups.length} groups` : ''}</span><span>{report.total} shipped</span>
             </div>
 
-            {tab === 'state' ? report.days.map((d) => (
-              <div key={d.day} style={{ padding: '0.55rem 0', borderBottom: '1px solid var(--border-color)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <strong>{istDateLabel(d.day)}</strong>
-                  <span className="badge badge-completed">{d.total} shipped</span>
+            {report.groups.map((g) => (
+              <div key={g.customerId} style={{ marginBottom: '1.4rem' }}>
+                {/* Group header */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '0.5rem', borderBottom: '2px solid var(--primary-color)', paddingBottom: '0.3rem', marginBottom: '0.7rem' }}>
+                  <strong style={{ fontSize: '1.05rem' }}>{g.name}</strong>
+                  <span className="badge badge-completed" style={{ whiteSpace: 'nowrap' }}>{g.total} shipped</span>
                 </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem', marginTop: '0.4rem' }}>
-                  {Object.entries(d.states).sort((a, b) => b[1] - a[1]).map(([st, n]) => (
-                    <span key={st} className="badge badge-gray" style={{ fontSize: '0.72rem' }}>{st}: {n}</span>
+                {/* Product cards for this group — nick name + total + state counts */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '0.85rem' }}>
+                  {g.products.map((p, i) => (
+                    <div key={p.product + '|' + p.nickname + i} style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '0.85rem', background: 'var(--card-bg, white)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem' }}>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontWeight: 700, fontSize: '0.95rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.product}</div>
+                          {p.nickname && p.nickname !== p.product && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', color: 'var(--primary-color)', fontWeight: 600, fontSize: '0.78rem', marginTop: '0.15rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              <Tag size={12} /> {p.nickname}
+                            </div>
+                          )}
+                        </div>
+                        <div style={{ textAlign: 'right', whiteSpace: 'nowrap', color: 'var(--primary-color)', lineHeight: 1.1 }}>
+                          <span style={{ fontWeight: 800, fontSize: '1.35rem' }}>{p.total}</span>
+                          <div style={{ fontSize: '0.65rem', color: 'var(--text-secondary)' }}>shipped</div>
+                        </div>
+                      </div>
+                      <div style={{ marginTop: '0.6rem', borderTop: '1px dashed var(--border-color)', paddingTop: '0.55rem' }}>
+                        <div style={{ fontSize: '0.66rem', textTransform: 'uppercase', letterSpacing: '0.03em', color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>By state</div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem' }}>
+                          {Object.entries(p.states).sort((a, b) => b[1] - a[1]).map(([st, n]) => (
+                            <span key={st} className="badge badge-primary" style={{ fontSize: '0.72rem' }}>{st}: {n}</span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
                   ))}
                 </div>
               </div>
-            )) : (
-              // One card per product — nick name + total + its state counts.
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '0.85rem' }}>
-                {(report.products || []).map((p, i) => (
-                  <div key={p.product + '|' + p.nickname + i} style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '0.85rem', background: 'var(--card-bg, white)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem' }}>
-                      <div style={{ minWidth: 0 }}>
-                        <div style={{ fontWeight: 700, fontSize: '0.98rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.product}</div>
-                        {p.nickname && p.nickname !== p.product && (
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', color: 'var(--primary-color)', fontWeight: 600, fontSize: '0.78rem', marginTop: '0.15rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            <Tag size={12} /> {p.nickname}
-                          </div>
-                        )}
-                      </div>
-                      <div style={{ textAlign: 'right', whiteSpace: 'nowrap', color: 'var(--primary-color)', lineHeight: 1.1 }}>
-                        <span style={{ fontWeight: 800, fontSize: '1.4rem' }}>{p.total}</span>
-                        <div style={{ fontSize: '0.65rem', color: 'var(--text-secondary)' }}>shipped</div>
-                      </div>
-                    </div>
-                    <div style={{ marginTop: '0.6rem', borderTop: '1px dashed var(--border-color)', paddingTop: '0.55rem' }}>
-                      <div style={{ fontSize: '0.66rem', textTransform: 'uppercase', letterSpacing: '0.03em', color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>By state</div>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem' }}>
-                        {Object.entries(p.states).sort((a, b) => b[1] - a[1]).map(([st, n]) => (
-                          <span key={st} className="badge badge-primary" style={{ fontSize: '0.72rem' }}>{st}: {n}</span>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+            ))}
           </>
         )}
       </div>

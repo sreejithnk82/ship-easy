@@ -158,65 +158,75 @@ function action_listOrders_(payload, ctx) {
 /* --------------------------- shipment report --------------------------- */
 
 /**
- * Per-day, state-wise SHIPPED report for one customer — the billing source of
- * truth (state charges differ). Also returns a per-product breakdown (each
- * product with its owner nick name + state split) for the "By product" view.
- * Reads the Orders sheet directly, so it's accurate across every device/operator.
- * Any scanner may run it for their customer (admins for any). Optional
- * fromDay/toDay are IST "yyyy-mm-dd".
+ * Group-wise SHIPPED report for a date range: for each customer GROUP that has
+ * shipments in the range, its products broken down by owner nick name — each with
+ * a total + per-state split. A superadmin spans EVERY group; a scoped user
+ * (operator/admin) sees only their own. Groups with no shipments in the range are
+ * omitted. Reads each group's Orders sheet directly (accurate across devices).
+ * Optional fromDay/toDay are IST "yyyy-mm-dd".
  */
 function action_shipmentReport_(payload, ctx) {
   if (!canScan_(ctx)) return forbidden_();
-  var c = resolveCustomerId_(payload, ctx);
-  if (c.error) return c.error;
   var fromDay = payload.fromDay ? String(payload.fromDay) : '';
   var toDay = payload.toDay ? String(payload.toDay) : '';
 
-  var ss = getCustomerSpreadsheet_(c.id);
-  var rows = readObjects_(getSheetOrThrow_(ss, SHEETS.ORDERS)).rows;
+  // Groups to include: superadmin → all; otherwise just the caller's own.
+  var targets = [];
+  if (isSuperadmin_(ctx)) {
+    readObjects_(getSheetOrThrow_(getDirectorySpreadsheet_(), SHEETS.CUSTOMERS)).rows.forEach(function (r) {
+      if (r.spreadsheet_id) targets.push({ id: String(r.customer_id), name: String(r.name || r.customer_id), ssId: String(r.spreadsheet_id) });
+    });
+  } else {
+    var c = resolveCustomerId_(payload, ctx);
+    if (c.error) return c.error;
+    var rec = getCustomerRecord_(c.id);
+    targets.push({ id: String(c.id), name: String(rec.name || c.id), ssId: String(rec.spreadsheet_id) });
+  }
 
-  // Orders store only product_id, so map it -> { name, nickname } for the
-  // per-product view (the nick name is the owner tag shown in the report).
+  var groups = [], grand = 0;
+  targets.forEach(function (t) {
+    var ss;
+    try { ss = SpreadsheetApp.openById(t.ssId); } catch (e) { return; }   // skip a broken group
+    var b = shippedProductBreakdown_(ss, fromDay, toDay);
+    if (b.total === 0) return;                                            // only groups scanned in range
+    groups.push({ customerId: t.id, name: t.name, total: b.total, products: b.products });
+    grand += b.total;
+  });
+  groups.sort(function (a, b) { return b.total - a.total; });
+  return { ok: true, groups: groups, total: grand };
+}
+
+/**
+ * One group's shipped parcels in [fromDay,toDay], grouped by PRIMARY product
+ * (extras ignored → one count per parcel): { total, products:[{product, nickname,
+ * total, states}] } sorted by total desc.
+ */
+function shippedProductBreakdown_(ss, fromDay, toDay) {
+  var rows = readObjects_(getSheetOrThrow_(ss, SHEETS.ORDERS)).rows;
   var prodById = {};
   readObjects_(getSheetOrThrow_(ss, SHEETS.PRODUCTS)).rows.forEach(function (pr) {
     prodById[String(pr.product_id)] = { name: String(pr.name || ''), nickname: String(pr.nickname || '') };
   });
-
-  var byDay = {};
-  var byProduct = {};                                // keyed by PRIMARY product_id
+  var byProduct = {}, total = 0;
   rows.forEach(function (r) {
     if (String(r.status) !== 'shipped') return;
-    var ts = String(r.shipped_at || r.created_at || '');
-    var day = ts.slice(0, 10);                       // shipped_at is already IST (yyyy-mm-dd…)
+    var day = String(r.shipped_at || r.created_at || '').slice(0, 10);   // shipped_at already IST
     if (!day) return;
-    if (fromDay && day < fromDay) return;            // yyyy-mm-dd sorts lexicographically
+    if (fromDay && day < fromDay) return;                                // yyyy-mm-dd sorts lexicographically
     if (toDay && day > toDay) return;
     var st = String(r.receiver_state || '').trim() || '—';
-
-    if (!byDay[day]) byDay[day] = { day: day, total: 0, states: {} };
-    byDay[day].total += 1;
-    byDay[day].states[st] = (byDay[day].states[st] || 0) + 1;
-
-    // Per product — primary product only, so one count per parcel (extras ignored).
     var pid = String(r.product_id || '');
     if (!byProduct[pid]) {
-      var meta = prodById[pid] || { name: '', nickname: '' };
-      byProduct[pid] = { product: meta.name || pid, nickname: meta.nickname || meta.name || pid, total: 0, states: {} };
+      var m = prodById[pid] || { name: '', nickname: '' };
+      byProduct[pid] = { product: m.name || pid, nickname: m.nickname || m.name || pid, total: 0, states: {} };
     }
     byProduct[pid].total += 1;
     byProduct[pid].states[st] = (byProduct[pid].states[st] || 0) + 1;
+    total += 1;
   });
-
-  var days = Object.keys(byDay).sort().reverse().map(function (d) { return byDay[d]; });
-  var totals = {};
-  var grand = 0;
-  days.forEach(function (d) {
-    grand += d.total;
-    Object.keys(d.states).forEach(function (st) { totals[st] = (totals[st] || 0) + d.states[st]; });
-  });
-  var products = Object.keys(byProduct).map(function (pid) { return byProduct[pid]; })
+  var products = Object.keys(byProduct).map(function (k) { return byProduct[k]; })
     .sort(function (a, b) { return b.total - a.total; });
-  return { ok: true, days: days, totals: totals, total: grand, products: products };
+  return { total: total, products: products };
 }
 
 /* ------------------------------ balances ------------------------------ */

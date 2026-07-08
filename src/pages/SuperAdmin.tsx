@@ -39,6 +39,8 @@ export const SuperAdmin = () => {
   const [editCust, setEditCust] = useState<Customer | null>(null);
   const [editCustForm, setEditCustForm] = useState({ name: '', senderName: '', senderPhone: '', senderAddr1: '', senderAddr2: '', senderCity: '', senderState: '', senderPincode: '', senderEmail: '', hubCustomerCode: '', status: '' });
   const [user, setUser] = useState({ email: '', customerId: '', role: 'member' });
+  const [editUser, setEditUser] = useState<UserRow | null>(null);
+  const [editUserForm, setEditUserForm] = useState({ role: 'member', customerId: '', status: 'active' });
   const [newHub, setNewHub] = useState({ code: '', label: '' });
 
   // ranges
@@ -135,6 +137,27 @@ export const SuperAdmin = () => {
     setBusy(true);
     try { await api.addUser(user); setUser({ email: '', customerId: '', role: 'member' }); load(); notify('User added.', 'success'); }
     catch (e: any) { notify('Add user failed: ' + e.message, 'error'); } finally { setBusy(false); }
+  };
+
+  const openEditUser = (u: UserRow) => {
+    setEditUser(u);
+    setEditUserForm({ role: u.role || 'member', customerId: u.customerId || '', status: u.status || 'active' });
+  };
+  const saveEditUser = async () => {
+    if (!editUser) return;
+    const global = editUserForm.role === 'superadmin' || editUserForm.role === 'admin';
+    if (!global && !editUserForm.customerId) { notify('Pick a group for members/operators.', 'error'); return; }
+    setBusy(true);
+    try {
+      await api.updateUser(editUser.email, { role: editUserForm.role, customerId: global ? '' : editUserForm.customerId, status: editUserForm.status });
+      setEditUser(null); notify('User updated.', 'success'); load();
+    } catch (e: any) { notify('Update failed: ' + e.message, 'error'); } finally { setBusy(false); }
+  };
+  const removeUser = async (u: UserRow) => {
+    if (!(await confirm({ title: 'Remove user', message: <>Remove <strong>{u.email}</strong>? They'll lose access immediately.</>, confirmLabel: 'Remove', requireCode: true }))) return;
+    setBusy(true);
+    try { await api.removeUser(u.email); notify('User removed.', 'success'); load(); }
+    catch (e: any) { notify('Remove failed: ' + e.message, 'error'); } finally { setBusy(false); }
   };
 
   const addHubCode = async () => {
@@ -316,7 +339,13 @@ export const SuperAdmin = () => {
                       {groupOf(u)}{u.status && u.status !== 'active' ? ` · ${u.status}` : ''}
                     </div>
                   </div>
-                  <span className={`badge ${roleClass(u.role)}`} style={{ textTransform: 'capitalize', flex: '0 0 auto' }}>{u.role}</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: '0 0 auto' }}>
+                    <span className={`badge ${roleClass(u.role)}`} style={{ textTransform: 'capitalize' }}>{u.role}</span>
+                    {canWriteDirectory && profile?.email?.toLowerCase() !== u.email.toLowerCase() && (<>
+                      <button title="Edit user" onClick={() => openEditUser(u)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--primary-color)', padding: '0.2rem' }}><Pencil size={15} /></button>
+                      <button title="Remove user" onClick={() => removeUser(u)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger-color)', padding: '0.2rem' }}><Trash2 size={15} /></button>
+                    </>)}
+                  </div>
                 </div>
               ));
             })()}
@@ -519,6 +548,43 @@ export const SuperAdmin = () => {
           </div>
         </Modal>
       )}
+
+      {/* Edit user modal */}
+      {editUser && (() => {
+        const global = editUserForm.role === 'superadmin' || editUserForm.role === 'admin';
+        return (
+        <Modal title={`Edit ${editUser.email}`} onClose={() => setEditUser(null)}>
+          <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: 0 }}>Email is the key and can't be changed.</p>
+          <div className="input-group">
+            <label className="input-label">Role</label>
+            <select className="input-field" value={editUserForm.role}
+              onChange={(e) => setEditUserForm({ ...editUserForm, role: e.target.value, customerId: (e.target.value === 'superadmin' || e.target.value === 'admin') ? '' : editUserForm.customerId })}>
+              <option value="member">member</option><option value="admin">admin</option><option value="operator">operator</option><option value="superadmin">superadmin</option>
+            </select>
+          </div>
+          <div className="input-group">
+            <label className="input-label">Group {global ? '(none for admin/superadmin)' : '*'}</label>
+            <select className="input-field" value={editUserForm.customerId} disabled={global}
+              onChange={(e) => setEditUserForm({ ...editUserForm, customerId: e.target.value })}
+              style={global ? { opacity: 0.6 } : undefined}>
+              <option value="">{global ? '— none (all groups) —' : '— choose a group —'}</option>
+              {customers.map((c) => <option key={c.customerId} value={c.customerId}>{c.name} ({c.customerId})</option>)}
+            </select>
+          </div>
+          <div className="input-group">
+            <label className="input-label">Status</label>
+            <select className="input-field" value={editUserForm.status} onChange={(e) => setEditUserForm({ ...editUserForm, status: e.target.value })}>
+              <option value="active">active</option>
+              <option value="disabled">disabled (blocks sign-in)</option>
+            </select>
+          </div>
+          <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem' }}>
+            <button className="btn btn-outline" style={{ flex: 1 }} onClick={() => setEditUser(null)}>Cancel</button>
+            <button className="btn btn-primary" style={{ flex: 1 }} onClick={saveEditUser} disabled={busy || (!global && !editUserForm.customerId)}>{busy ? 'Saving…' : 'Save'}</button>
+          </div>
+        </Modal>
+        );
+      })()}
     </div>
   );
 };

@@ -138,6 +138,116 @@ function resetProductsSheets() {
   return out;
 }
 
+/* ---------------------- lockdown (edit safety) ------------------------- */
+
+// Whole tabs only the app should ever write — warning-protected so nobody
+// hand-edits them. Directory vs per-customer spreadsheets carry different tabs.
+var LOCK_APP_TABS_CUSTOMER = [SHEETS.ORDERS, SHEETS.BATCHES, SHEETS.MANIFESTS, SHEETS.RANGES];
+var LOCK_APP_TABS_DIRECTORY = [SHEETS.USERS];
+var LOCK_TAG = 'ShipEasy lock:';           // marks the protections we create (for idempotent re-runs)
+var LOCK_HELP_PIN = 'Must be exactly 6 digits (e.g. 110001) — no $, commas or decimals.';
+
+/**
+ * ONE-TIME hardening — run manually from the editor (pick `lockdownSheets` → Run).
+ * Across the Directory + every customer spreadsheet it: freezes + warning-protects
+ * each tab's header row, warning-protects the app-only tabs, and adds data
+ * validation + plain-text formatting to the columns that break when hand-edited
+ * (pincodes, customer_id, status). Changes NO data and never blocks the app (it
+ * runs as owner; warning protections + validation only guard MANUAL edits).
+ * Idempotent — safe to re-run. Returns a per-spreadsheet summary (also logged).
+ */
+function lockdownSheets() {
+  var out = [];
+  var dir = getDirectorySpreadsheet_();
+  out.push('Directory: ' + lockdownSpreadsheet_(dir, LOCK_APP_TABS_DIRECTORY));
+
+  var custs = readObjects_(getSheetOrThrow_(dir, SHEETS.CUSTOMERS)).rows;
+  custs.forEach(function (c) {
+    if (!c.spreadsheet_id) return;
+    var ss;
+    try { ss = SpreadsheetApp.openById(String(c.spreadsheet_id)); }
+    catch (e) { out.push((c.customer_id || c.name) + ': cannot open spreadsheet'); return; }
+    out.push((c.customer_id || c.name) + ': ' + lockdownSpreadsheet_(ss, LOCK_APP_TABS_CUSTOMER));
+  });
+  Logger.log(out.join('\n'));
+  return out;
+}
+
+/** Freeze + protect headers, protect app tabs, and validate key columns on one ss. */
+function lockdownSpreadsheet_(ss, appTabs) {
+  clearLockProtections_(ss);                          // drop our previous protections → no stacking
+  var appSet = {};
+  appTabs.forEach(function (n) { appSet[n] = true; });
+  var lockedTabs = 0, vals = 0;
+
+  ss.getSheets().forEach(function (sh) {
+    var name = sh.getName();
+    var lastCol = sh.getLastColumn() || 1;
+    sh.setFrozenRows(1);
+
+    if (appSet[name]) {
+      sh.protect().setWarningOnly(true).setDescription(LOCK_TAG + ' sheet');   // whole app-only tab
+      lockedTabs++;
+      return;                                          // no per-column validation on app tabs
+    }
+
+    sh.getRange(1, 1, 1, lastCol).protect().setWarningOnly(true).setDescription(LOCK_TAG + ' header');
+
+    // Column validation only on hand-editable tabs, and only if there are data rows.
+    var nRows = sh.getMaxRows() - 1;
+    if (nRows < 1) return;
+    var headers = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(function (h) { return String(h).trim(); });
+    headers.forEach(function (h, i) {
+      if (h === 'pincode' || /_pincode$/.test(h)) { validate6Digit_(sh, i + 1, nRows); vals++; }
+    });
+    if (name === SHEETS.CUSTOMERS) {
+      var ci = headers.indexOf('customer_id');
+      if (ci >= 0) { validateRequiredUnique_(sh, ci + 1, nRows); vals++; }
+      var si = headers.indexOf('status');
+      if (si >= 0) { validateList_(sh, si + 1, nRows, ['active', 'inactive']); vals++; }
+    }
+  });
+
+  return lockedTabs + ' app-tab(s) locked, headers locked, ' + vals + ' validation(s)';
+}
+
+/** Remove protections this script previously added, so re-runs don't pile up. */
+function clearLockProtections_(ss) {
+  [SpreadsheetApp.ProtectionType.SHEET, SpreadsheetApp.ProtectionType.RANGE].forEach(function (type) {
+    ss.getProtections(type).forEach(function (p) {
+      if (String(p.getDescription() || '').indexOf(LOCK_TAG) === 0) {
+        try { p.remove(); } catch (e) { /* best effort */ }
+      }
+    });
+  });
+}
+
+// --- column validators: plain-text format (so pastes don't reformat) + reject bad input ---
+function validate6Digit_(sh, col, nRows) {
+  var rng = sh.getRange(2, col, nRows, 1);
+  rng.setNumberFormat('@');
+  var a1 = sh.getRange(2, col).getA1Notation();       // relative anchor, adjusts per row
+  rng.setDataValidation(SpreadsheetApp.newDataValidation()
+    .requireFormulaSatisfied('=REGEXMATCH(TO_TEXT(' + a1 + '),"^\\d{6}$")')
+    .setAllowInvalid(false).setHelpText(LOCK_HELP_PIN).build());
+}
+
+function validateRequiredUnique_(sh, col, nRows) {
+  var rng = sh.getRange(2, col, nRows, 1);
+  rng.setNumberFormat('@');
+  var a1 = sh.getRange(2, col).getA1Notation();
+  var colRef = a1.replace(/\d+/g, '');                // "A2" -> "A"
+  colRef = colRef + ':' + colRef;                     // whole-column, row-count independent
+  rng.setDataValidation(SpreadsheetApp.newDataValidation()
+    .requireFormulaSatisfied('=AND(LEN(' + a1 + ')>0, EXACT(' + a1 + ',TRIM(' + a1 + ')), COUNTIF(' + colRef + ',' + a1 + ')=1)')
+    .setAllowInvalid(false).setHelpText('Required, no surrounding spaces, and must be unique.').build());
+}
+
+function validateList_(sh, col, nRows, list) {
+  sh.getRange(2, col, nRows, 1).setDataValidation(
+    SpreadsheetApp.newDataValidation().requireValueInList(list, true).setAllowInvalid(false).build());
+}
+
 /* ----------------------------- hub codes ------------------------------- */
 
 var HUBCODE_HEADERS = ['hub_customer_code', 'label', 'created_at'];
@@ -214,6 +324,52 @@ function action_listUsers_(payload, ctx) {
       return { email: r.email, customerId: r.customer_id, role: r.role, status: r.status };
     }),
   };
+}
+
+/** Edit a user's role / group / status (email is the immutable key). Superadmin
+ *  only. You can't edit your own account here (prevents self-lockout). */
+function action_updateUser_(payload, ctx) {
+  if (!requireSuperadmin_(ctx)) return forbidden_();
+  var email = String(payload.email || '').toLowerCase();
+  var f = payload.fields || {};
+  if (!email) return badRequest_('email required');
+  if (email === String(ctx.email || '').toLowerCase()) return badRequest_("You can't edit your own account here.");
+  if (f.role !== undefined && ['member', 'admin', 'operator', 'superadmin'].indexOf(f.role) < 0) return badRequest_('invalid role');
+  if (f.status !== undefined && ['active', 'disabled'].indexOf(f.status) < 0) return badRequest_('invalid status');
+
+  var sheet = getSheetOrThrow_(getDirectorySpreadsheet_(), SHEETS.USERS);
+  var data = readObjects_(sheet);
+  var row = data.rows.find(function (r) { return String(r.email).toLowerCase() === email; });
+  if (!row) return { ok: false, error: 'NOT_FOUND' };
+
+  // Global roles (admin/superadmin) hold no group; member/operator need one.
+  var role = f.role !== undefined ? f.role : String(row.role || '');
+  var global = (role === 'superadmin' || role === 'admin');
+  var newCust;
+  if (f.role !== undefined || f.customerId !== undefined) {
+    newCust = global ? '' : (f.customerId !== undefined ? f.customerId : String(row.customer_id || ''));
+    if (!global && !newCust) return badRequest_('a group is required for member/operator');
+  }
+
+  var setCell = function (name, val) { var col = data.headers.indexOf(name) + 1; if (col > 0) sheet.getRange(row._row, col).setValue(val); };
+  if (f.role !== undefined) setCell('role', f.role);
+  if (newCust !== undefined) setCell('customer_id', newCust);
+  if (f.status !== undefined) setCell('status', f.status);
+  SpreadsheetApp.flush();
+  return { ok: true };
+}
+
+/** Delete a user row by email. Superadmin only; can't remove your own account. */
+function action_removeUser_(payload, ctx) {
+  if (!requireSuperadmin_(ctx)) return forbidden_();
+  var email = String(payload.email || '').toLowerCase();
+  if (!email) return badRequest_('email required');
+  if (email === String(ctx.email || '').toLowerCase()) return badRequest_("You can't remove your own account.");
+  var sheet = getSheetOrThrow_(getDirectorySpreadsheet_(), SHEETS.USERS);
+  var row = readObjects_(sheet).rows.find(function (r) { return String(r.email).toLowerCase() === email; });
+  if (!row) return { ok: false, error: 'NOT_FOUND' };
+  sheet.deleteRow(row._row);
+  return { ok: true };
 }
 
 /* --------------------------- tracking ranges --------------------------- */

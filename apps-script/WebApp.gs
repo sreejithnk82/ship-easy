@@ -121,6 +121,8 @@ function dispatch_(action, payload, ctx) {
     case 'addHubCode':         return action_addHubCode_(payload, ctx);
     case 'addUser':            return action_addUser_(payload, ctx);
     case 'listUsers':          return action_listUsers_(payload, ctx);
+    case 'updateUser':         return action_updateUser_(payload, ctx);
+    case 'removeUser':         return action_removeUser_(payload, ctx);
     case 'addTrackingRange':   return action_addTrackingRange_(payload, ctx);
     case 'listTrackingRanges': return action_listTrackingRanges_(payload, ctx);
     case 'updateTrackingRange':   return action_updateTrackingRange_(payload, ctx);

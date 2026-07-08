@@ -106,13 +106,12 @@ export interface OrderRow {
 }
 export interface Balance { customerId: string; name: string; remaining: number; low: boolean; }
 export interface Health { orderRows: number; columns: number; orderCells: number; cellLimit: number; warn: boolean; pctOfLimit: number; }
-export interface ShipmentReportDay { day: string; total: number; states: Record<string, number>; }
-// A product's shipped tally over the period: its name, owner nick name, total, and per-state split.
+// A product's shipped tally: name, owner nick name, total, per-state split.
 export interface ShipmentReportProduct { product: string; nickname: string; total: number; states: Record<string, number>; }
-export interface ShipmentReport {
-  days: ShipmentReportDay[]; totals: Record<string, number>; total: number;
-  products: ShipmentReportProduct[];
-}
+// A customer GROUP's shipped tally over the range: its products (each by nick name).
+export interface ShipmentReportGroup { customerId: string; name: string; total: number; products: ShipmentReportProduct[]; }
+// Group-wise report: for each group with shipments in the range → products → states.
+export interface ShipmentReport { groups: ShipmentReportGroup[]; total: number; }
 
 export interface Customer {
   customerId: string; name: string; spreadsheetId?: string;
@@ -187,6 +186,9 @@ export const api = {
   addUser: (user: { email: string; customerId: string; role: string }) =>
     callApi<{ ok: true }>('addUser', { user }),
   listUsers: () => callApi<{ users: UserRow[] }>('listUsers'),
+  updateUser: (email: string, fields: { role?: string; customerId?: string; status?: string }) =>
+    callApi<{ ok: true }>('updateUser', { email, fields }),
+  removeUser: (email: string) => callApi<{ ok: true }>('removeUser', { email }),
   addTrackingRange: (customerId: string, range: { prefix?: string; start: number; end: number; pad?: number }) =>
     callApi<{ seq: number }>('addTrackingRange', { customerId, range }),
   listTrackingRanges: (customerId: string) => callApi<{ ranges: TrackingRange[] }>('listTrackingRanges', { customerId }),
