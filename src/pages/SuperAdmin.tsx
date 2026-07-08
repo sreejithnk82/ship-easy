@@ -145,8 +145,8 @@ export const SuperAdmin = () => {
   };
   const saveEditUser = async () => {
     if (!editUser) return;
-    const global = editUserForm.role === 'superadmin' || editUserForm.role === 'admin';
-    if (!global && !editUserForm.customerId) { notify('Pick a group for members/operators.', 'error'); return; }
+    const global = editUserForm.role !== 'member';   // only member is tied to a group
+    if (!global && !editUserForm.customerId) { notify('Pick a group for the member.', 'error'); return; }
     setBusy(true);
     try {
       await api.updateUser(editUser.email, { role: editUserForm.role, customerId: global ? '' : editUserForm.customerId, status: editUserForm.status });
