@@ -75,11 +75,12 @@ export const ScanBook = () => {
     normMapRef.current = m;
   }, [openMap]);
 
-  useEffect(() => { if (customerId) load(); }, [customerId]);
+  // Operator (cross-group) has no customerId — load spans all groups instead.
+  useEffect(() => { if (customerId || crossGroup) load(); }, [customerId, crossGroup]);
 
   // Persist the scanned selection whenever it changes (after the initial restore).
   useEffect(() => {
-    if (!hydratedRef.current || !customerId) return;
+    if (!hydratedRef.current || (!customerId && !crossGroup)) return;
     try { localStorage.setItem(scannedKey, JSON.stringify(scanned.map((s) => s.trackingId))); } catch { /* ignore */ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scanned]);
@@ -292,7 +293,7 @@ export const ScanBook = () => {
   };
 
   if (!canScan(profile)) return <div className="page-title">Admins only.</div>;
-  if (!customerId) {
+  if (!customerId && !crossGroup) {
     return <div><h1 className="page-title">Scan &amp; Book</h1>
       <p style={{ color: 'var(--text-secondary)' }}>Select a customer in the "Acting as" bar above to scan their parcels.</p></div>;
   }
