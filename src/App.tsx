@@ -196,7 +196,9 @@ const App = () => {
   if (profileErr === 'NO_ACCOUNT' || (!profile && profileErr)) {
     return <ContactAdmin errorMsg={profileErr === 'NO_ACCOUNT' ? null : profileErr} />;
   }
-  if (!profile?.customerId && !isAdmin(profile)) {
+  // A user with no group is only OK if they're global: admin/superadmin, or the
+  // group-less warehouse operator (canScan covers both). Others → Contact Admin.
+  if (!profile?.customerId && !canScan(profile)) {
     return <ContactAdmin errorMsg={null} />;
   }
 
