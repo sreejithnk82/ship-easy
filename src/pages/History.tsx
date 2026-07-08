@@ -94,10 +94,11 @@ export const History = () => {
     ? dayBatches.map((b) => ({ ...b, labels: b.labels.filter(labelMatches) })).filter((b) => b.labels.length > 0)
     : dayBatches;
 
+  const groupTag = (profile?.customer?.name || 'Labels').replace(/\s+/g, '_');
   const openBatchOutput = (b: UiBatch) =>
-    setOutput({ labels: b.labels, products: b.products, title: `${b.labels.length} label${b.labels.length === 1 ? '' : 's'} · #${b.batchId.slice(0, 8)}`, filename: `labels_${b.batchId.slice(0, 8)}.pdf` });
+    setOutput({ labels: b.labels, products: b.products, title: `${b.labels.length} label${b.labels.length === 1 ? '' : 's'} · #${b.batchId.slice(0, 8)}`, filename: `${groupTag}_${istDayKey(b.createdAt)}.pdf` });
   const openLabelOutput = (b: UiBatch, l: UiLabel) =>
-    setOutput({ labels: [l], products: b.products, title: `Label ${l.trackingId}`, filename: `label_${l.trackingId}.pdf` });
+    setOutput({ labels: [l], products: b.products, title: `Label ${l.trackingId}`, filename: `${groupTag}_${l.trackingId}.pdf` });
 
   if (!customerId) {
     return <div className="fade-in"><h1 className="page-title">Label History</h1>

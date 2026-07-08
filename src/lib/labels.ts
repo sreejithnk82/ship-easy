@@ -111,3 +111,16 @@ export function printLabels(orders: LabelOrder[], products: Product[], fmt: Labe
   window.open(url, '_blank');
   setTimeout(() => URL.revokeObjectURL(url), 60000); // give the viewer time to load
 }
+
+/** Make a safe PDF filename: drop illegal chars, spaces→'_', ensure one '.pdf'. */
+export function cleanName(s: string): string {
+  let n = String(s || '').trim().replace(/\.pdf$/i, '');
+  n = n.replace(/[/\\:*?"<>|]+/g, '').replace(/\s+/g, '_').replace(/_+/g, '_').replace(/^_+|_+$/g, '');
+  if (!n) n = `labels_${istDayKey(new Date())}`;
+  return n + '.pdf';
+}
+
+/** The labels PDF wrapped as a File, for the Web Share API (share to WhatsApp etc.). */
+export function buildLabelsFile(orders: LabelOrder[], products: Product[], fmt: LabelFormat, filename: string): File {
+  return new File([buildLabelsPdf(orders, products, fmt)], cleanName(filename), { type: 'application/pdf' });
+}

@@ -217,8 +217,11 @@ function shippedProductBreakdown_(ss, fromDay, toDay) {
     var st = String(r.receiver_state || '').trim() || '—';
     var pid = String(r.product_id || '');
     if (!byProduct[pid]) {
-      var m = prodById[pid] || { name: '', nickname: '' };
-      byProduct[pid] = { product: m.name || pid, nickname: m.nickname || m.name || pid, total: 0, states: {} };
+      // If the order's product no longer exists (deleted / sheet reset), show a
+      // friendly label instead of leaking the raw product_id UUID.
+      var m = prodById[pid];
+      var nm = (m && m.name) ? m.name : '(product removed)';
+      byProduct[pid] = { product: nm, nickname: (m && m.nickname) ? m.nickname : nm, total: 0, states: {} };
     }
     byProduct[pid].total += 1;
     byProduct[pid].states[st] = (byProduct[pid].states[st] || 0) + 1;

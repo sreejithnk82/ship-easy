@@ -3,6 +3,7 @@ import { Save, AlertCircle, Package, Printer, Trash2, Pencil, WifiOff, LayoutGri
 import { api, Product, OrderInput } from '../lib/api';
 import { ApiError } from '../lib/api';
 import { useProfile } from '../lib/profile';
+import { todayIstDayKey } from '../lib/datetime';
 import { useActiveCustomer } from '../lib/activeCustomer';
 import { stateFromPincode, isValidPincode } from '../lib/pincode';
 import { validateContact, minChars, isValidIndianMobile } from '../lib/validate';
@@ -528,6 +529,7 @@ export const AddOrder = () => {
           labels={outputBatch.labels}
           products={outputBatch.products}
           title="Download labels"
+          filename={`${(profile?.customer?.name || 'Labels').replace(/\s+/g, '_')}_${todayIstDayKey()}.pdf`}
           onClose={() => setOutputBatch(null)}
         />
       )}
