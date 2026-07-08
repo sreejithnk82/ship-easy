@@ -342,9 +342,10 @@ function action_updateUser_(payload, ctx) {
   var row = data.rows.find(function (r) { return String(r.email).toLowerCase() === email; });
   if (!row) return { ok: false, error: 'NOT_FOUND' };
 
-  // Global roles (admin/superadmin) hold no group; member/operator need one.
+  // Group-less roles (admin/superadmin, and operator = global warehouse) hold no
+  // group; only member needs one.
   var role = f.role !== undefined ? f.role : String(row.role || '');
-  var global = (role === 'superadmin' || role === 'admin');
+  var global = (role === 'superadmin' || role === 'admin' || role === 'operator');
   var newCust;
   if (f.role !== undefined || f.customerId !== undefined) {
     newCust = global ? '' : (f.customerId !== undefined ? f.customerId : String(row.customer_id || ''));

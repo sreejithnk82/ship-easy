@@ -92,7 +92,12 @@ export interface OrderInput {
   receiverName: string; receiverPhone: string; receiverPincode: string;
   receiverLine1: string; receiverLine2: string; receiverState: string;
 }
-export interface OpenOrder extends Omit<OrderInput, 'clientOrderId'> { orderId: string; trackingId: string; exportedAt?: string; }
+export interface OpenOrder extends Omit<OrderInput, 'clientOrderId'> {
+  orderId: string; trackingId: string; exportedAt?: string;
+  // Group tags — export/ship are routed to this group, and the DTDC row's hub
+  // code (col AE) comes from it. Present on both single- and cross-group loads.
+  customerId: string; hubCustomerCode: string; groupName?: string;
+}
 export interface Assignment { clientOrderId: string; trackingId: string; }
 
 // A customer's own order with live lifecycle status (server-backed history).
@@ -149,7 +154,9 @@ export const api = {
   generateLabels: (customerId: string, idempotencyKey: string, orders: OrderInput[]) =>
     callApi<{ batchId: string; count: number; assignments: Assignment[] }>(
       'generateLabels', { customerId, idempotencyKey, orders }),
-  listOpenOrders: (customerId: string) => callApi<{ orders: OpenOrder[]; hubCustomerCode: string }>('listOpenOrders', { customerId }),
+  listOpenOrders: (customerId: string) => callApi<{ orders: OpenOrder[] }>('listOpenOrders', { customerId }),
+  // Warehouse operator: open parcels across ALL groups + all groups' products.
+  listAllOpenOrders: () => callApi<{ orders: OpenOrder[]; products: Product[] }>('listAllOpenOrders'),
   updateOrder: (
     customerId: string,
     key: { orderId?: string; trackingId?: string },

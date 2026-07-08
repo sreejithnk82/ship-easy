@@ -42,6 +42,7 @@ export interface DtdcOrder {
   receiverLine1: string;
   receiverLine2: string;
   receiverState?: string;
+  hubCustomerCode?: string;   // the parcel's GROUP hub code → DTDC col AE (per row)
 }
 
 /**
@@ -49,9 +50,10 @@ export interface DtdcOrder {
  * (one label): weight + declared value are SUMMED across them, the package
  * dimensions are the LARGEST product's box (by volume), and the description lists
  * all items. Sender & content come from the primary (first) product; the Hub
- * Customer Code is a customer-level account field, passed in.
+ * Customer Code is the parcel's GROUP account field (carried on the order, so a
+ * mixed-group warehouse export gets the right code per row).
  */
-export function buildDtdcRow(order: DtdcOrder, byId: Map<string, Product>, hubCustomerCode: string): (string | number)[] {
+export function buildDtdcRow(order: DtdcOrder, byId: Map<string, Product>): (string | number)[] {
   // Pair each product id with its chosen variant label, keeping index alignment
   // (primary first), then resolve products and drop any that no longer exist.
   const rawIds = [order.productId, ...(order.extraProductIds || [])];
@@ -110,7 +112,7 @@ export function buildDtdcRow(order: DtdcOrder, byId: Map<string, Product>, hubCu
     '',                                             // AB Receiver's City
     state,                                          // AC Receiver's State
     '',                                             // AD Receiver's Email
-    hubCustomerCode || '',                          // AE Hub Customer Code (customer-level)
+    order.hubCustomerCode || '',                    // AE Hub Customer Code (per parcel's group)
     '', '', '', '',                                 // AF–AI VAS Product/Mode/Favor/Amount
     '',                                             // AJ Consignment Type
     '', '',                                         // AK–AL Origin/Destination W3W
@@ -120,10 +122,10 @@ export function buildDtdcRow(order: DtdcOrder, byId: Map<string, Product>, hubCu
 }
 
 /** Build the workbook (header row + one row per order) as an .xlsx Blob. */
-export function buildDtdcWorkbook(orders: DtdcOrder[], products: Product[], hubCustomerCode: string): Blob {
+export function buildDtdcWorkbook(orders: DtdcOrder[], products: Product[]): Blob {
   const byId = new Map(products.map((p) => [p.productId, p]));
   const aoa: (string | number)[][] = [DTDC_HEADERS];
-  orders.forEach((o) => aoa.push(buildDtdcRow(o, byId, hubCustomerCode)));
+  orders.forEach((o) => aoa.push(buildDtdcRow(o, byId)));
 
   const ws = XLSX.utils.aoa_to_sheet(aoa);
   const wb = XLSX.utils.book_new();
@@ -135,8 +137,8 @@ export function buildDtdcWorkbook(orders: DtdcOrder[], products: Product[], hubC
 }
 
 /** Trigger a browser download of the DTDC workbook. */
-export function downloadDtdc(orders: DtdcOrder[], products: Product[], hubCustomerCode: string, filename?: string) {
-  const blob = buildDtdcWorkbook(orders, products, hubCustomerCode);
+export function downloadDtdc(orders: DtdcOrder[], products: Product[], filename?: string) {
+  const blob = buildDtdcWorkbook(orders, products);
   const name = filename || `ScannedItems_${istDayKey(new Date()).replace(/-/g, '')}.xlsx`;
   triggerDownload(blob, name);
 }

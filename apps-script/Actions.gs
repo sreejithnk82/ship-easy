@@ -358,14 +358,10 @@ function action_deleteSenderAddress_(payload, ctx) {
 
 /* ------------------------ hub: scan & ship ----------------------------- */
 
-/** Orders generated but not yet shipped (status 'labeled') — for the scan screen. */
-function action_listOpenOrders_(payload, ctx) {
-  if (!canScan_(ctx)) return forbidden_();
-  var c = resolveCustomerId_(payload, ctx);
-  if (c.error) return c.error;
-  var ss = getCustomerSpreadsheet_(c.id);
-  var rows = readObjects_(getSheetOrThrow_(ss, SHEETS.ORDERS)).rows;
-  var open = rows
+/** Open ('labeled') orders for ONE group, each stamped with its group id / hub
+ *  code / name so the scan screen can export + mark shipped per group. */
+function openOrdersForGroup_(ss, customerId, hubCode, groupName) {
+  return readObjects_(getSheetOrThrow_(ss, SHEETS.ORDERS)).rows
     .filter(function (r) { return String(r.status) === 'labeled'; })
     .map(function (r) {
       return {
@@ -382,17 +378,52 @@ function action_listOpenOrders_(payload, ctx) {
         receiverLine2: r.receiver_line2,
         receiverState: r.receiver_state,
         exportedAt: r.exported_at ? String(r.exported_at) : '',
+        // Group tags → the DTDC "Hub Customer Code" (col AE) is a group-level
+        // account field, and export/ship are routed back to this group.
+        customerId: String(customerId),
+        hubCustomerCode: String(hubCode || ''),
+        groupName: String(groupName || ''),
       };
     });
-  // The DTDC "Hub Customer Code" is a customer-level account field (not per
-  // product), so hand it to the scan screen for the export.
-  return { ok: true, orders: open, hubCustomerCode: String(getCustomerRecord_(c.id).hub_customer_code || '') };
+}
+
+/** Orders generated but not yet shipped for ONE group — for the scan screen. */
+function action_listOpenOrders_(payload, ctx) {
+  if (!canScan_(ctx)) return forbidden_();
+  var c = resolveCustomerId_(payload, ctx);
+  if (c.error) return c.error;
+  var rec = getCustomerRecord_(c.id);
+  var open = openOrdersForGroup_(getCustomerSpreadsheet_(c.id), c.id, rec.hub_customer_code, rec.name);
+  return { ok: true, orders: open };
+}
+
+/** ALL groups' open orders for the warehouse operator: every open parcel across
+ *  every customer (each stamped with its group id / hub / name), plus ALL groups'
+ *  products (product_id is a UUID → globally unique, so one array suffices).
+ *  canScan_-gated; the front end uses it for the group-less operator role. */
+function action_listAllOpenOrders_(payload, ctx) {
+  if (!canScan_(ctx)) return forbidden_();
+  var custs = readObjects_(getSheetOrThrow_(getDirectorySpreadsheet_(), SHEETS.CUSTOMERS)).rows;
+  var orders = [], products = [];
+  custs.forEach(function (r) {
+    if (!r.spreadsheet_id) return;
+    var ss;
+    try { ss = SpreadsheetApp.openById(String(r.spreadsheet_id)); } catch (e) { return; }
+    var open = openOrdersForGroup_(ss, r.customer_id, r.hub_customer_code, r.name);
+    if (!open.length) return;                          // skip groups with nothing open
+    orders = orders.concat(open);
+    var addrById = senderAddressMap_(ss);
+    readObjects_(getSheetOrThrow_(ss, SHEETS.PRODUCTS)).rows.forEach(function (pr) {
+      products.push(productFromRow_(pr, addrById));
+    });
+  });
+  return { ok: true, orders: orders, products: products };
 }
 
 /** Mark a set of scanned tracking IDs shipped + record a manifest. */
 function action_commitShipment_(payload, ctx) {
   if (!canScan_(ctx)) return forbidden_();
-  var c = resolveCustomerId_(payload, ctx);
+  var c = resolveScanCustomerId_(payload, ctx);   // a warehouse operator ships any group
   if (c.error) return c.error;
   var trackingIds = payload.trackingIds;
   if (!Array.isArray(trackingIds) || !trackingIds.length) return badRequest_('trackingIds required');
@@ -512,6 +543,15 @@ function resolveCustomerId_(payload, ctx) {
   if (!isAdmin_(ctx) && String(ctx.customerId) !== String(id)) {
     return { error: forbidden_() };
   }
+  return { id: id };
+}
+
+// For SCAN actions only (commitShipment / recordExport): a warehouse scanner may
+// act on ANY group. Safe because those actions are all canScan_-gated — the role
+// gate decides WHO may scan; this just resolves WHICH group the parcel belongs to.
+function resolveScanCustomerId_(payload, ctx) {
+  var id = payload.customerId || ctx.customerId;
+  if (!id) return { error: badRequest_('customerId required') };
   return { id: id };
 }
 

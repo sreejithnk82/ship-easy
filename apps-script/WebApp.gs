@@ -61,6 +61,7 @@ function doGet(e) {
 // write and is blocked for non-superadmins while MAINTENANCE_MODE is set).
 var READ_ACTIONS_ = {
   getProfile: 1, listProducts: 1, listSenderAddresses: 1, listOpenOrders: 1,
+  listAllOpenOrders: 1,
   listOrders: 1, customerBalance: 1, listCustomers: 1, listHubCodes: 1,
   listUsers: 1, listTrackingRanges: 1, listBalances: 1, customerHealth: 1,
   listServiceablePincodes: 1, shipmentReport: 1,
@@ -105,6 +106,7 @@ function dispatch_(action, payload, ctx) {
     case 'deleteSenderAddress':  return action_deleteSenderAddress_(payload, ctx);
     case 'generateLabels': return action_generateLabels_(payload, ctx);
     case 'listOpenOrders': return action_listOpenOrders_(payload, ctx);
+    case 'listAllOpenOrders': return action_listAllOpenOrders_(payload, ctx);
     case 'updateOrder':    return action_updateOrder_(payload, ctx);
     case 'commitShipment': return action_commitShipment_(payload, ctx);
     case 'voidOrder':      return action_voidOrder_(payload, ctx);

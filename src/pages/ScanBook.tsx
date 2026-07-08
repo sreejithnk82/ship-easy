@@ -17,12 +17,13 @@ export const ScanBook = () => {
   const profile = useProfile();
   const { activeId } = useActiveCustomer();
   const customerId = profile?.customerId || activeId;
+  // The warehouse operator is group-less and scans EVERY group's parcels.
+  const crossGroup = profile?.role === 'operator';
   const notify = useToast();
   const confirm = useConfirm();
 
   const [openMap, setOpenMap] = useState<Map<string, OpenOrder>>(new Map());
   const [products, setProducts] = useState<Product[]>([]);
-  const [hubCode, setHubCode] = useState('');   // customer-level DTDC Hub Customer Code
   const [scanned, setScanned] = useState<OpenOrder[]>([]);
   const [code, setCode] = useState('');
   const [flash, setFlash] = useState<Flash>(null);
@@ -37,12 +38,12 @@ export const ScanBook = () => {
   const [report, setReport] = useState<ShipmentReport | null>(null);
   const [reportLoading, setReportLoading] = useState(false);
   const monthStart = todayIstDayKey().slice(0, 7) + '-01';
-  const [reportFrom, setReportFrom] = useState(monthStart);
+  const [reportFrom, setReportFrom] = useState(crossGroup ? todayIstDayKey() : monthStart);
   const [reportTo, setReportTo] = useState(todayIstDayKey());
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Persist the in-progress scanned selection so a refresh/crash doesn't lose it.
-  const scannedKey = `shipeasy.scanned.${customerId}`;
+  const scannedKey = `shipeasy.scanned.${crossGroup ? 'warehouse' : customerId}`;
   const hydratedRef = useRef(false); // don't persist until the saved list is restored
 
   const loadReport = async (from: string, to: string) => {
@@ -87,14 +88,19 @@ export const ScanBook = () => {
     setLoading(true);
     hydratedRef.current = false;
     try {
-      const [{ orders, hubCustomerCode }, { products }] = await Promise.all([
-        api.listOpenOrders(customerId),
-        api.listProducts(customerId),
-      ]);
+      // Operator (warehouse) loads open parcels across ALL groups; everyone else
+      // loads their one active group. Both stamp each order with its group + hub.
+      let orders: OpenOrder[]; let prods: Product[];
+      if (crossGroup) {
+        const res = await api.listAllOpenOrders();
+        orders = res.orders; prods = res.products;
+      } else {
+        const [openRes, prodRes] = await Promise.all([api.listOpenOrders(customerId), api.listProducts(customerId)]);
+        orders = openRes.orders; prods = prodRes.products;
+      }
       const map = new Map(orders.map((o) => [String(o.trackingId), o] as [string, OpenOrder]));
       setOpenMap(map);
-      setProducts(products);
-      setHubCode(hubCustomerCode || '');
+      setProducts(prods);
       // Restore the in-progress scan from local storage, re-hydrating from the
       // fresh open orders (drops anything no longer open — already shipped, etc.).
       let saved: string[] = [];
@@ -196,16 +202,30 @@ export const ScanBook = () => {
     }
   };
 
+  // Group the scanned parcels by their owning group (a warehouse scan can mix
+  // groups) so export/ship are recorded in each group's own sheet.
+  const groupScanned = <T,>(pick: (s: OpenOrder) => T): Map<string, T[]> => {
+    const by = new Map<string, T[]>();
+    scanned.forEach((s) => { const k = s.customerId || customerId; const a = by.get(k) || []; a.push(pick(s)); by.set(k, a); });
+    return by;
+  };
+
   const exportCsv = async () => {
     if (scanned.length === 0) { notify('Scan some packets first.', 'error'); return; }
-    const ids = scanned.map((s) => s.trackingId);
 
-    // Stamp the orders as exported so the same parcels can't be silently
-    // exported twice (a double courier booking). Warn if any already were.
-    let stamp: Awaited<ReturnType<typeof api.recordExport>> | null = null;
+    // Stamp the orders as exported (per group) so the same parcels can't be
+    // silently exported twice (a double courier booking). Warn if any already were.
+    const alreadyExported: { trackingId: string; exportedAt: string }[] = [];
+    const markedAll = new Set<string>();
+    let recorded = false;
     setBusy(true);
     try {
-      stamp = await api.recordExport(customerId, ids);
+      for (const [cid, ids] of Array.from(groupScanned((s) => s.trackingId).entries())) {
+        const stamp = await api.recordExport(cid, ids);
+        recorded = true;
+        stamp.alreadyExported.forEach((a) => alreadyExported.push(a));
+        stamp.marked.forEach((id) => markedAll.add(id));
+      }
     } catch (e: any) {
       const ok = await confirm({
         title: 'Export anyway?',
@@ -217,12 +237,12 @@ export const ScanBook = () => {
       setBusy(false);
     }
 
-    if (stamp && stamp.alreadyExported.length) {
-      const first = stamp.alreadyExported[0];
+    if (alreadyExported.length) {
+      const first = alreadyExported[0];
       const ok = await confirm({
         title: 'Already exported',
         message:
-          `${stamp.alreadyExported.length} of these parcels were ALREADY exported earlier ` +
+          `${alreadyExported.length} of these parcels were ALREADY exported earlier ` +
           `(e.g. ${first.trackingId} on ${istDateTimeLabel(first.exportedAt)}).\n\n` +
           `Re-exporting risks DOUBLE-BOOKING them with the courier. Download anyway?`,
         confirmLabel: 'Download anyway', danger: true,
@@ -230,34 +250,40 @@ export const ScanBook = () => {
       if (!ok) return;
     }
 
-    if (stamp) {
+    if (recorded && markedAll.size) {
       const now = new Date().toISOString();
-      const marked = new Set(stamp.marked);
-      setOpenMap((prev) => { const m = new Map(prev); marked.forEach((id) => { const o = m.get(id); if (o) m.set(id, { ...o, exportedAt: now }); }); return m; });
-      setScanned((prev) => prev.map((s) => (marked.has(s.trackingId) ? { ...s, exportedAt: now } : s)));
+      setOpenMap((prev) => { const m = new Map(prev); markedAll.forEach((id) => { const o = m.get(id); if (o) m.set(id, { ...o, exportedAt: now }); }); return m; });
+      setScanned((prev) => prev.map((s) => (markedAll.has(s.trackingId) ? { ...s, exportedAt: now } : s)));
     }
 
+    // ONE combined file — each row carries its parcel's own group hub code.
     const rows: DtdcOrder[] = scanned.map((s) => ({
       trackingId: s.trackingId, productId: s.productId, extraProductIds: s.extraProductIds || [],
       variant: s.variant || '', extraVariants: s.extraVariants || [],
       receiverName: s.receiverName, receiverPhone: s.receiverPhone,
       receiverPincode: s.receiverPincode, receiverLine1: s.receiverLine1,
       receiverLine2: s.receiverLine2, receiverState: s.receiverState,
+      hubCustomerCode: s.hubCustomerCode,
     }));
-    downloadDtdc(rows, products, hubCode);
+    downloadDtdc(rows, products);
   };
 
   const markShipped = async () => {
     if (scanned.length === 0) { notify('Nothing scanned.', 'error'); return; }
-    if (!(await confirm({ title: 'Mark shipped', message: `Mark ${scanned.length} packets shipped and record a manifest?`, confirmLabel: 'Mark shipped' }))) return;
+    if (!(await confirm({ title: 'Mark shipped', message: `Mark ${scanned.length} packets shipped and record a manifest? This can't be undone — shipped parcels leave the scan list.`, confirmLabel: 'Mark shipped', requireCode: true }))) return;
     setBusy(true);
     try {
-      const ids = scanned.map((s) => s.trackingId);
-      const res = await api.commitShipment(customerId, ids);
-      setOpenMap((prev) => { const m = new Map(prev); res.marked.forEach((id) => m.delete(id)); return m; });
+      let marked = 0, already = 0, notFound = 0;
+      const markedIds = new Set<string>();
+      for (const [cid, ids] of Array.from(groupScanned((s) => s.trackingId).entries())) {
+        const res = await api.commitShipment(cid, ids);   // one manifest per group
+        marked += res.marked.length; already += res.alreadyShipped.length; notFound += res.notFound.length;
+        res.marked.forEach((id) => markedIds.add(id));
+      }
+      setOpenMap((prev) => { const m = new Map(prev); markedIds.forEach((id) => m.delete(id)); return m; });
       try { localStorage.removeItem(scannedKey); } catch { /* ignore */ }
       setScanned([]);
-      setFlash({ kind: 'ok', text: `Shipped ${res.marked.length}. ${res.alreadyShipped.length} already shipped, ${res.notFound.length} not found.` });
+      setFlash({ kind: 'ok', text: `Shipped ${marked}. ${already} already shipped, ${notFound} not found.` });
     } catch (e: any) {
       setFlash({ kind: 'err', text: 'Commit failed: ' + e.message });
     } finally {
@@ -356,6 +382,9 @@ export const ScanBook = () => {
                 </div>
                 <p style={{ margin: '0.25rem 0', fontFamily: 'monospace', fontSize: '0.85rem' }}>{s.trackingId}</p>
                 <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{s.receiverPincode} · {s.receiverState}</p>
+                {crossGroup && s.groupName && (
+                  <p style={{ margin: '0.2rem 0 0', fontSize: '0.75rem', color: 'var(--primary-color)', fontWeight: 600 }}>{s.groupName}</p>
+                )}
                 {(productById.get(s.productId)?.name || s.variant) && (
                   <p style={{ margin: '0.25rem 0 0', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
                     {productById.get(s.productId)?.name || 'Product'}{s.variant ? ` · ${s.variant}` : ''}
@@ -410,8 +439,10 @@ export const ScanBook = () => {
         <ShipmentReportModal
           report={report} loading={reportLoading}
           from={reportFrom} to={reportTo}
+          singleDay={crossGroup}
           onFrom={(v) => { setReportFrom(v); loadReport(v, reportTo); }}
           onTo={(v) => { setReportTo(v); loadReport(reportFrom, v); }}
+          onDay={(v) => { setReportFrom(v); setReportTo(v); loadReport(v, v); }}
           onClose={() => setShowReport(false)}
         />
       )}
@@ -439,9 +470,9 @@ function countBy<T>(arr: T[], key: (t: T) => string): Record<string, number> {
 // Server-backed, group-wise SHIPPED report over a date range: each customer GROUP
 // with shipments → its products (by nick name) → total + per-state counts. A
 // superadmin spans every group; a scoped user sees only their own.
-const ShipmentReportModal = ({ report, loading, from, to, onFrom, onTo, onClose }: {
-  report: ShipmentReport | null; loading: boolean; from: string; to: string;
-  onFrom: (v: string) => void; onTo: (v: string) => void; onClose: () => void;
+const ShipmentReportModal = ({ report, loading, from, to, singleDay, onFrom, onTo, onDay, onClose }: {
+  report: ShipmentReport | null; loading: boolean; from: string; to: string; singleDay?: boolean;
+  onFrom: (v: string) => void; onTo: (v: string) => void; onDay?: (v: string) => void; onClose: () => void;
 }) => {
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 3000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1.25rem' }}>
@@ -453,12 +484,18 @@ const ShipmentReportModal = ({ report, loading, from, to, onFrom, onTo, onClose 
         <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: '0 0 0.6rem' }}>Shipped parcels (IST) — by group → product → state.</p>
 
         <div style={{ display: 'flex', gap: '0.6rem', marginBottom: '0.85rem', flexWrap: 'wrap' }}>
-          <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>From
-            <input type="date" className="input-field" value={from} max={to} onChange={(e) => onFrom(e.target.value)} style={{ marginTop: '0.15rem' }} />
-          </label>
-          <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>To
-            <input type="date" className="input-field" value={to} min={from} onChange={(e) => onTo(e.target.value)} style={{ marginTop: '0.15rem' }} />
-          </label>
+          {singleDay ? (
+            <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Date
+              <input type="date" className="input-field" value={from} max={todayIstDayKey()} onChange={(e) => onDay && onDay(e.target.value)} style={{ marginTop: '0.15rem' }} />
+            </label>
+          ) : (<>
+            <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>From
+              <input type="date" className="input-field" value={from} max={to} onChange={(e) => onFrom(e.target.value)} style={{ marginTop: '0.15rem' }} />
+            </label>
+            <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>To
+              <input type="date" className="input-field" value={to} min={from} onChange={(e) => onTo(e.target.value)} style={{ marginTop: '0.15rem' }} />
+            </label>
+          </>)}
         </div>
 
         {loading ? <p style={{ color: 'var(--text-secondary)' }}>Loading…</p> : !report ? (

@@ -76,7 +76,7 @@ function action_voidOrder_(payload, ctx) {
  */
 function action_recordExport_(payload, ctx) {
   if (!canScan_(ctx)) return forbidden_();
-  var c = resolveCustomerId_(payload, ctx);
+  var c = resolveScanCustomerId_(payload, ctx);   // a warehouse operator exports any group
   if (c.error) return c.error;
   var trackingIds = payload.trackingIds;
   if (!Array.isArray(trackingIds) || !trackingIds.length) return badRequest_('trackingIds required');
@@ -170,9 +170,9 @@ function action_shipmentReport_(payload, ctx) {
   var fromDay = payload.fromDay ? String(payload.fromDay) : '';
   var toDay = payload.toDay ? String(payload.toDay) : '';
 
-  // Groups to include: superadmin → all; otherwise just the caller's own.
+  // Groups to include: superadmin & the warehouse operator → all; otherwise own.
   var targets = [];
-  if (isSuperadmin_(ctx)) {
+  if (isSuperadmin_(ctx) || ctx.role === 'operator') {
     readObjects_(getSheetOrThrow_(getDirectorySpreadsheet_(), SHEETS.CUSTOMERS)).rows.forEach(function (r) {
       if (r.spreadsheet_id) targets.push({ id: String(r.customer_id), name: String(r.name || r.customer_id), ssId: String(r.spreadsheet_id) });
     });

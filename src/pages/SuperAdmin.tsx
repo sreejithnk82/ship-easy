@@ -132,8 +132,8 @@ export const SuperAdmin = () => {
 
   const addUser = async () => {
     if (!user.email) { notify('Email required.', 'error'); return; }
-    const needsGroup = user.role === 'member' || user.role === 'operator';
-    if (needsGroup && !user.customerId) { notify('Pick a group for members/operators.', 'error'); return; }
+    const needsGroup = user.role === 'member';
+    if (needsGroup && !user.customerId) { notify('Pick a group for the member.', 'error'); return; }
     setBusy(true);
     try { await api.addUser(user); setUser({ email: '', customerId: '', role: 'member' }); load(); notify('User added.', 'success'); }
     catch (e: any) { notify('Add user failed: ' + e.message, 'error'); } finally { setBusy(false); }
@@ -292,8 +292,8 @@ export const SuperAdmin = () => {
 
       {/* USERS */}
       {tab === 'users' && (() => {
-        // admin & superadmin are global (no single group); member & operator need a group.
-        const userIsGlobal = user.role === 'superadmin' || user.role === 'admin';
+        // admin, superadmin & operator (warehouse) are global; only member needs a group.
+        const userIsGlobal = user.role === 'superadmin' || user.role === 'admin' || user.role === 'operator';
         return (
         <div className="glass-card" style={{ maxWidth: 560 }}>
           {canWriteDirectory && (<>
@@ -302,7 +302,7 @@ export const SuperAdmin = () => {
           <div className="input-group">
             <label className="input-label">Role</label>
             <select className="input-field" value={user.role}
-              onChange={(e) => setUser({ ...user, role: e.target.value, customerId: (e.target.value === 'superadmin' || e.target.value === 'admin') ? '' : user.customerId })}>
+              onChange={(e) => setUser({ ...user, role: e.target.value, customerId: (e.target.value !== 'member') ? '' : user.customerId })}>
               <option value="member">member</option><option value="admin">admin</option><option value="operator">operator</option><option value="superadmin">superadmin</option>
             </select>
           </div>
@@ -551,14 +551,14 @@ export const SuperAdmin = () => {
 
       {/* Edit user modal */}
       {editUser && (() => {
-        const global = editUserForm.role === 'superadmin' || editUserForm.role === 'admin';
+        const global = editUserForm.role !== 'member';   // only member is tied to a group
         return (
         <Modal title={`Edit ${editUser.email}`} onClose={() => setEditUser(null)}>
           <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: 0 }}>Email is the key and can't be changed.</p>
           <div className="input-group">
             <label className="input-label">Role</label>
             <select className="input-field" value={editUserForm.role}
-              onChange={(e) => setEditUserForm({ ...editUserForm, role: e.target.value, customerId: (e.target.value === 'superadmin' || e.target.value === 'admin') ? '' : editUserForm.customerId })}>
+              onChange={(e) => setEditUserForm({ ...editUserForm, role: e.target.value, customerId: (e.target.value !== 'member') ? '' : editUserForm.customerId })}>
               <option value="member">member</option><option value="admin">admin</option><option value="operator">operator</option><option value="superadmin">superadmin</option>
             </select>
           </div>
