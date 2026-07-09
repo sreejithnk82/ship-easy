@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { MapPin, Save, Plus, X, Pencil, Trash2, ArrowLeft } from 'lucide-react';
 import { api, SenderAddress, ApiError } from '../lib/api';
-import { useProfile } from '../lib/profile';
+import { useProfile, isAdmin } from '../lib/profile';
 import { useActiveCustomer } from '../lib/activeCustomer';
 import { stateFromPincode } from '../lib/pincode';
 import { useToast, useConfirm } from '../components/feedback';
@@ -25,7 +25,7 @@ export const Addresses = () => {
 
   const { activeId } = useActiveCustomer();
   const customerId = profile?.customerId || activeId;
-  const admin = profile?.role === 'superadmin'; // only superadmins manage addresses
+  const admin = isAdmin(profile); // admins & superadmins manage addresses
   const notify = useToast();
   const confirm = useConfirm();
 
@@ -97,7 +97,7 @@ export const Addresses = () => {
       await api.deleteSenderAddress(a.addressId, customerId);
       load();
     } catch (e) {
-      if (e instanceof ApiError && e.code === 'IN_USE') notify('Cannot delete: this address is used by existing products.', 'error');
+      if (e instanceof ApiError && e.code === 'IN_USE') notify('Cannot delete: this address is used by existing orders.', 'error');
       else notify('Delete failed: ' + (e as Error).message, 'error');
     }
   };

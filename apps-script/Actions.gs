@@ -254,7 +254,7 @@ function action_listSenderAddresses_(payload, ctx) {
 }
 
 function action_addSenderAddress_(payload, ctx) {
-  if (!isSuperadmin_(ctx)) return forbidden_();
+  if (!isAdmin_(ctx)) return forbidden_();
   var c = resolveCustomerId_(payload, ctx);
   if (c.error) return c.error;
   var a = payload.address || {};
@@ -272,7 +272,7 @@ function action_addSenderAddress_(payload, ctx) {
 }
 
 function action_updateSenderAddress_(payload, ctx) {
-  if (!isSuperadmin_(ctx)) return forbidden_();
+  if (!isAdmin_(ctx)) return forbidden_();
   var c = resolveCustomerId_(payload, ctx);
   if (c.error) return c.error;
   var addressId = payload.addressId;
@@ -296,18 +296,20 @@ function action_updateSenderAddress_(payload, ctx) {
   return { ok: true, changed: changed };
 }
 
-/** Delete an address, but refuse if any product still references it. */
+/** Delete an address, but refuse if any order still references it. */
 function action_deleteSenderAddress_(payload, ctx) {
-  if (!isSuperadmin_(ctx)) return forbidden_();
+  if (!isAdmin_(ctx)) return forbidden_();
   var c = resolveCustomerId_(payload, ctx);
   if (c.error) return c.error;
   var addressId = payload.addressId;
   if (!addressId) return badRequest_('addressId required');
 
   var ss = getCustomerSpreadsheet_(c.id);
-  var products = readObjects_(getSheetOrThrow_(ss, SHEETS.PRODUCTS)).rows;
-  var inUse = products.some(function (r) { return String(r.sender_address_id) === String(addressId); });
-  if (inUse) return { ok: false, error: 'IN_USE', detail: 'Address is used by existing products.' };
+  // The sender is chosen at booking and stored on the ORDER (not the product), so
+  // an address is "in use" while any order still references it.
+  var orders = readObjects_(getSheetOrThrow_(ss, SHEETS.ORDERS)).rows;
+  var inUse = orders.some(function (r) { return String(r.sender_address_id) === String(addressId); });
+  if (inUse) return { ok: false, error: 'IN_USE', detail: 'Address is used by existing orders.' };
 
   var sheet = getAddressSheet_(ss);
   var row = readObjects_(sheet).rows.find(function (r) { return String(r.address_id) === String(addressId); });

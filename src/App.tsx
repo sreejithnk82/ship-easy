@@ -39,7 +39,7 @@ const NavItems = ({ profile }: { profile: Profile | null }) => (
         <HistoryIcon size={20} /> Label History
       </NavLink>
     )}
-    {profile?.role === 'superadmin' && (
+    {isAdmin(profile) && (
       <NavLink to="/addresses" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
         <MapPin size={20} /> Addresses
       </NavLink>
@@ -101,6 +101,9 @@ const Layout = ({ profile, children, switcher }: { profile: Profile | null; chil
       )}
       {!isOperator(profile) && (
         <NavLink to="/history" className={({ isActive }) => `bottom-nav-item ${isActive ? 'active' : ''}`}><HistoryIcon size={22} /><span>History</span></NavLink>
+      )}
+      {isAdmin(profile) && (
+        <NavLink to="/addresses" className={({ isActive }) => `bottom-nav-item ${isActive ? 'active' : ''}`}><MapPin size={22} /><span>From</span></NavLink>
       )}
       {canScan(profile) && (
         <NavLink to="/scan" className={({ isActive }) => `bottom-nav-item ${isActive ? 'active' : ''}`}><ScanLine size={22} /><span>Scan</span></NavLink>

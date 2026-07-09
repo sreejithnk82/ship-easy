@@ -265,7 +265,7 @@ export const SuperAdmin = () => {
                 </select>
               </div>
             </div>
-            <button className="btn btn-primary" onClick={createCustomer} disabled={busy} style={{ marginTop: '1rem' }}><Save size={16} /> Create</button>
+            <button className="btn btn-primary" onClick={createCustomer} disabled={busy} style={{ marginTop: '1rem' }}><Save size={16} /> {busy ? 'Creating…' : 'Create'}</button>
           </div>
           )}
 
@@ -320,7 +320,7 @@ export const SuperAdmin = () => {
               {user.role}s belong to one group — pick the group they'll work under.
             </p>
           )}
-          <button className="btn btn-primary" onClick={addUser} disabled={busy || (!userIsGlobal && !user.customerId) || !user.email}><Save size={16} /> Add User</button>
+          <button className="btn btn-primary" onClick={addUser} disabled={busy || (!userIsGlobal && !user.customerId) || !user.email}><Save size={16} /> {busy ? 'Adding…' : 'Add User'}</button>
           </>)}
           <h4 style={{ marginBottom: '0.5rem' }}>Users ({users.length})</h4>
           <div style={{ fontSize: '0.85rem' }}>
@@ -364,7 +364,7 @@ export const SuperAdmin = () => {
             <F label="Hub Code *" v={newHub.code} on={(v) => setNewHub({ ...newHub, code: v })} ph="OF2357C004" />
             <F label="Label" v={newHub.label} on={(v) => setNewHub({ ...newHub, label: v })} ph="optional" />
           </div>
-          <button className="btn btn-primary" onClick={addHubCode} disabled={busy} style={{ marginTop: '0.5rem' }}><Save size={16} /> Add Hub Code</button>
+          <button className="btn btn-primary" onClick={addHubCode} disabled={busy} style={{ marginTop: '0.5rem' }}><Save size={16} /> {busy ? 'Adding…' : 'Add Hub Code'}</button>
           </>)}
           <div style={{ marginTop: '1rem', fontSize: '0.85rem' }}>
             {loading && <div style={{ color: 'var(--text-secondary)' }}>Loading…</div>}
@@ -394,7 +394,7 @@ export const SuperAdmin = () => {
                 <F label="End *" v={rangeForm.end} on={(v) => setRangeForm({ ...rangeForm, end: v })} />
                 <F label="Pad" v={rangeForm.pad} on={(v) => setRangeForm({ ...rangeForm, pad: v })} ph="auto" />
               </div>
-              <button className="btn btn-primary" onClick={addRange} disabled={busy} style={{ marginTop: '0.5rem' }}><Save size={16} /> Add Range</button>
+              <button className="btn btn-primary" onClick={addRange} disabled={busy} style={{ marginTop: '0.5rem' }}><Save size={16} /> {busy ? 'Adding…' : 'Add Range'}</button>
 
               <div style={{ marginTop: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                 {loadingRanges && <div style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>Loading…</div>}

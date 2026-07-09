@@ -2,6 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App.tsx';
 import { ToastProvider, ConfirmProvider } from './components/feedback';
+import { ActivityBar } from './components/ActivityBar';
 import './index.css';
 
 // Global error handler for mobile debugging
@@ -24,6 +25,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <ToastProvider>
       <ConfirmProvider>
+        <ActivityBar />
         <App />
       </ConfirmProvider>
     </ToastProvider>

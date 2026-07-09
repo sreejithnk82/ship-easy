@@ -379,7 +379,7 @@ export const ScanBook = () => {
                       <button title="Edit" onClick={() => startEdit(s)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--primary-color)' }}><Pencil size={16} /></button>
                     )}
                     {isAdmin(profile) && (
-                      <button title="Void / cancel" onClick={() => voidOrder(s)} disabled={busy} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger-color)' }}><Ban size={16} /></button>
+                      <button title="Void / cancel" onClick={() => voidOrder(s)} disabled={busy} style={{ background: 'none', border: 'none', cursor: busy ? 'not-allowed' : 'pointer', opacity: busy ? 0.4 : 1, color: 'var(--danger-color)' }}><Ban size={16} /></button>
                     )}
                     <button title="Remove from this scan" onClick={() => removeScan(s.trackingId)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)' }}><X size={18} /></button>
                   </div>

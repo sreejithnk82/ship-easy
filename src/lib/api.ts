@@ -7,6 +7,7 @@
 
 import { WEBAPP_URL } from './config';
 import { ensureIdToken } from './auth';
+import { beginRequest, endRequest } from './activity';
 
 export class ApiError extends Error {
   code: string;
@@ -20,34 +21,47 @@ export class ApiError extends Error {
   }
 }
 
-export async function callApi<T = any>(action: string, payload: Record<string, any> = {}): Promise<T> {
+// `background: true` skips the global activity indicator — for silent, automatic
+// refreshes (profile revalidate, balance/serviceable polling) that the user
+// didn't trigger, so the top bar only reflects user-facing work.
+export interface CallOpts { background?: boolean; }
+
+export async function callApi<T = any>(
+  action: string,
+  payload: Record<string, any> = {},
+  opts: CallOpts = {},
+): Promise<T> {
   if (!WEBAPP_URL) throw new ApiError('NO_ENDPOINT', 'VITE_WEBAPP_URL is not set.');
-
-  const token = await ensureIdToken();
-  let res: Response;
+  if (!opts.background) beginRequest();
   try {
-    res = await fetch(WEBAPP_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action, token, payload }),
-      redirect: 'follow',
-    });
-  } catch (e: any) {
-    throw new ApiError('NETWORK', e?.message || 'Network request failed');
-  }
+    const token = await ensureIdToken();
+    let res: Response;
+    try {
+      res = await fetch(WEBAPP_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action, token, payload }),
+        redirect: 'follow',
+      });
+    } catch (e: any) {
+      throw new ApiError('NETWORK', e?.message || 'Network request failed');
+    }
 
-  let data: any;
-  try {
-    data = await res.json();
-  } catch {
-    throw new ApiError('BAD_RESPONSE', `HTTP ${res.status}: non-JSON response`);
-  }
+    let data: any;
+    try {
+      data = await res.json();
+    } catch {
+      throw new ApiError('BAD_RESPONSE', `HTTP ${res.status}: non-JSON response`);
+    }
 
-  if (!data || data.ok !== true) {
-    const { error, detail, ...rest } = data || {};
-    throw new ApiError(error || 'ERROR', detail, rest);
+    if (!data || data.ok !== true) {
+      const { error, detail, ...rest } = data || {};
+      throw new ApiError(error || 'ERROR', detail, rest);
+    }
+    return data as T;
+  } finally {
+    if (!opts.background) endRequest();
   }
-  return data as T;
 }
 
 /* Typed wrappers for the actions the UI uses. */
@@ -135,7 +149,7 @@ export interface TrackingRange {
 }
 
 export const api = {
-  getProfile: () => callApi<Profile & { ok: true }>('getProfile'),
+  getProfile: () => callApi<Profile & { ok: true }>('getProfile', {}, { background: true }),
   listProducts: (customerId?: string) => callApi<{ products: Product[] }>('listProducts', { customerId }),
   addProduct: (product: Partial<Product>, customerId?: string) =>
     callApi<{ productId: string }>('addProduct', { product, customerId }),
@@ -177,19 +191,19 @@ export const api = {
   shipmentReport: (customerId: string, fromDay?: string, toDay?: string) =>
     callApi<ShipmentReport>('shipmentReport', { customerId, fromDay, toDay }),
   customerBalance: (customerId: string) =>
-    callApi<{ remaining: number; threshold: number; low: boolean }>('customerBalance', { customerId }),
+    callApi<{ remaining: number; threshold: number; low: boolean }>('customerBalance', { customerId }, { background: true }),
   listBalances: () => callApi<{ balances: Balance[]; threshold: number }>('listBalances'),
   customerHealth: (customerId: string) => callApi<Health & { ok: true }>('customerHealth', { customerId }),
   archiveOrders: (customerId: string, beforeISO: string) =>
     callApi<{ moved: number }>('archiveOrders', { customerId, beforeISO }),
 
   // superadmin onboarding
-  listCustomers: () => callApi<{ customers: Customer[] }>('listCustomers'),
+  listCustomers: () => callApi<{ customers: Customer[] }>('listCustomers', {}, { background: true }),
   createCustomer: (customer: Partial<Customer> & { customerId: string; name: string }) =>
     callApi<{ customerId: string; spreadsheetUrl: string }>('createCustomer', { customer }),
   updateCustomer: (customerId: string, fields: Partial<Customer>) =>
     callApi<{ ok: true }>('updateCustomer', { customerId, fields }),
-  listServiceablePincodes: () => callApi<{ pincodes: string[] }>('listServiceablePincodes'),
+  listServiceablePincodes: () => callApi<{ pincodes: string[] }>('listServiceablePincodes', {}, { background: true }),
   listHubCodes: () => callApi<{ hubCodes: HubCode[] }>('listHubCodes'),
   addHubCode: (code: string, label?: string) => callApi<{ ok: true }>('addHubCode', { code, label }),
   addUser: (user: { email: string; customerId: string; role: string }) =>
