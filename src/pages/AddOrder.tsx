@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Save, AlertCircle, Package, Printer, Trash2, Pencil, WifiOff, LayoutGrid, X, ListOrdered, Search } from 'lucide-react';
-import { api, Product, OrderInput } from '../lib/api';
+import { api, Product, OrderInput, SenderAddress } from '../lib/api';
 import { ApiError } from '../lib/api';
 import { useProfile } from '../lib/profile';
 import { todayIstDayKey } from '../lib/datetime';
@@ -17,7 +17,7 @@ import { LabelOutputModal } from '../components/LabelOutputModal';
 import { AddressSorter, SortedFields } from '../components/AddressSorter';
 import { useToast, useConfirm } from '../components/feedback';
 
-const EMPTY = { name: '', phone: '', pincode: '', line1: '', line2: '', state: '', productId: '', variant: '', extraProductIds: [] as string[], extraVariants: [] as string[] };
+const EMPTY = { name: '', phone: '', pincode: '', line1: '', line2: '', state: '', senderAddressId: '', productId: '', variant: '', extraProductIds: [] as string[], extraVariants: [] as string[] };
 const MAX_EXTRA = 4; // up to 5 products per parcel (1 primary + 4 extra)
 
 export const AddOrder = () => {
@@ -28,6 +28,7 @@ export const AddOrder = () => {
   const confirm = useConfirm();
 
   const [products, setProducts] = useState<Product[]>([]);
+  const [addresses, setAddresses] = useState<SenderAddress[]>([]);   // the group's senders
   const [pending, setPending] = useState<PendingOrder[]>([]);
   const [balance, setBalance] = useState<{ remaining: number; low: boolean } | null>(null);
   const [raw, setRaw] = useState('');
@@ -48,7 +49,7 @@ export const AddOrder = () => {
   // The just-generated batch, shown in the size/Download/Print modal.
   const [outputBatch, setOutputBatch] = useState<{ labels: LabelOrder[]; products: Product[] } | null>(null);
 
-  useEffect(() => { if (customerId) { loadProducts(); refresh(); refreshBalance(); refreshServiceableIfStale(); } }, [customerId]);
+  useEffect(() => { if (customerId) { loadProducts(); loadSenders(); refresh(); refreshBalance(); refreshServiceableIfStale(); } }, [customerId]);
 
   const loadProducts = async () => {
     setLoadingProducts(true);
@@ -56,6 +57,20 @@ export const AddOrder = () => {
     catch (e: any) { console.error(e); }
     finally { setLoadingProducts(false); }
   };
+  const loadSenders = async () => {
+    try { setAddresses((await api.listSenderAddresses(customerId)).addresses); }
+    catch (e: any) { console.error(e); }
+  };
+  // Default the booking Sender to the last one used (else the first) — pick once,
+  // reused every order, always changeable.
+  useEffect(() => {
+    if (addresses.length && !f.senderAddressId) {
+      let last = ''; try { last = localStorage.getItem(lastSenderKey) || ''; } catch { /* ignore */ }
+      const has = (id: string) => addresses.some((a) => a.addressId === id);
+      setF((prev) => ({ ...prev, senderAddressId: (last && has(last)) ? last : addresses[0].addressId }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [addresses]);
   const refresh = async () => setPending(await listPending(customerId));
 
   // Remaining tracking IDs (for the count + the generate guard). Best-effort:
@@ -76,6 +91,7 @@ export const AddOrder = () => {
   // pre-selected next time — most orders in a session share one product.
   const lastProductKey = `shipeasy.lastProduct.${customerId}`;
   const getLastProduct = () => { try { return localStorage.getItem(lastProductKey) || ''; } catch { return ''; } };
+  const lastSenderKey = `shipeasy.lastSender.${customerId}`;
 
   const keyName = `shipeasy.batchKey.${customerId}`;
   const getBatchKey = () => {
@@ -134,6 +150,7 @@ export const AddOrder = () => {
     if (problem) { notify(problem, 'error'); return; }
     if (!isValidPincode(ff.pincode)) { notify('Enter a valid 6-digit pincode.', 'error'); return; }
     if (!isServiceable(ff.pincode)) { notify(`Pincode ${ff.pincode.replace(/\D/g, '')} is not in the DTDC serviceable list. Check the pincode, or refresh the list if it was recently added.`, 'error'); return; }
+    if (!ff.senderAddressId) { notify('Select a sender.', 'error'); return; }
     if (!ff.productId) { notify('Select a product.', 'error'); return; }
     // A variant must be chosen for any product that defines variants.
     if (variantsOf(ff.productId).length && !ff.variant) { notify('Select a variant for the product.', 'error'); return; }
@@ -150,6 +167,7 @@ export const AddOrder = () => {
     const order: PendingOrder = {
       clientOrderId: editId || newClientOrderId(),
       customerId,
+      senderAddressId: ff.senderAddressId,
       productId: ff.productId,
       variant: ff.variant || '',
       extraProductIds: exPairs.map((p) => p.id),
@@ -164,7 +182,7 @@ export const AddOrder = () => {
       sourceText: raw.trim() || existing?.sourceText, // keep the pasted block for later reference
     };
     await addPending(order); // put() upserts by clientOrderId
-    try { localStorage.setItem(lastProductKey, ff.productId); } catch { /* ignore */ }
+    try { localStorage.setItem(lastProductKey, ff.productId); localStorage.setItem(lastSenderKey, ff.senderAddressId); } catch { /* ignore */ }
     setRaw(''); setF({ ...EMPTY }); setAdding(false); setEditId(null); setAttempted(false);
     refresh();
   };
@@ -175,7 +193,8 @@ export const AddOrder = () => {
     setAttempted(false);
     setF({
       name: o.receiverName, phone: o.receiverPhone, pincode: o.receiverPincode,
-      line1: o.receiverLine1, line2: o.receiverLine2, state: o.receiverState, productId: o.productId,
+      line1: o.receiverLine1, line2: o.receiverLine2, state: o.receiverState,
+      senderAddressId: o.senderAddressId || '', productId: o.productId,
       variant: o.variant || '',
       extraProductIds: o.extraProductIds || [],
       extraVariants: o.extraVariants || [],
@@ -224,7 +243,7 @@ export const AddOrder = () => {
     setGenerating(true);
     const key = getBatchKey();
     const orders: OrderInput[] = pending.map((p) => ({
-      clientOrderId: p.clientOrderId, productId: p.productId, extraProductIds: p.extraProductIds || [],
+      clientOrderId: p.clientOrderId, senderAddressId: p.senderAddressId, productId: p.productId, extraProductIds: p.extraProductIds || [],
       variant: p.variant || '', extraVariants: p.extraVariants || [],
       receiverName: p.receiverName, receiverPhone: p.receiverPhone,
       receiverPincode: p.receiverPincode, receiverLine1: p.receiverLine1,
@@ -234,10 +253,12 @@ export const AddOrder = () => {
     try {
       const res = await api.generateLabels(customerId, key, orders);
       const byId = new Map(pending.map((p) => [p.clientOrderId, p]));
+      const addrById = new Map(addresses.map((a) => [a.addressId, a]));   // resolve the "From:" name
       const labelOrders = res.assignments.map((a) => {
         const p = byId.get(a.clientOrderId)!;
         return {
           trackingId: a.trackingId, productId: p.productId,
+          senderName: addrById.get(p.senderAddressId)?.senderName || '',
           variant: p.variant, extraProductIds: p.extraProductIds || [], extraVariants: p.extraVariants || [],
           receiverName: p.receiverName, receiverPhone: p.receiverPhone,
           receiverPincode: p.receiverPincode, receiverLine1: p.receiverLine1,
@@ -380,6 +401,17 @@ export const AddOrder = () => {
             </div>
             <In label="Address Line 1 *" v={f.line1} on={(v) => setF({ ...f, line1: v })} error={err('line1')} />
             <In label="Address Line 2 *" v={f.line2} on={(v) => setF({ ...f, line2: v })} error={err('line2')} />
+
+            <div className="input-group">
+              <label className="input-label">Sender (From) *</label>
+              <select className="input-field" value={f.senderAddressId} onChange={(e) => setF({ ...f, senderAddressId: e.target.value })}
+                style={attempted && !f.senderAddressId ? { borderColor: 'var(--danger-color)' } : undefined}>
+                <option value="">-- Choose sender --</option>
+                {addresses.map((a) => <option key={a.addressId} value={a.addressId}>{a.senderName}{a.senderCity ? ` · ${a.senderCity}` : ''}</option>)}
+              </select>
+              {attempted && !f.senderAddressId && <div style={{ color: 'var(--danger-color)', fontSize: '0.75rem', marginTop: '0.25rem' }}>Select a sender</div>}
+              {addresses.length === 0 && <div style={{ color: 'var(--text-secondary)', fontSize: '0.75rem', marginTop: '0.25rem' }}>No senders yet — ask your admin to add a sender address.</div>}
+            </div>
 
             <div className="input-group">
               <label className="input-label">Product *</label>

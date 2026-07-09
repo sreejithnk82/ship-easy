@@ -43,15 +43,18 @@ export interface DtdcOrder {
   receiverLine2: string;
   receiverState?: string;
   hubCustomerCode?: string;   // the parcel's GROUP hub code → DTDC col AE (per row)
+  // The "From" sender chosen at booking → DTDC cols O–V (per row).
+  senderName?: string; senderPhone?: string; senderAddr1?: string; senderAddr2?: string;
+  senderCity?: string; senderState?: string; senderPincode?: string; senderEmail?: string;
 }
 
 /**
  * One DTDC row (array in DTDC_HEADERS order). A parcel can carry several products
  * (one label): weight + declared value are SUMMED across them, the package
  * dimensions are the LARGEST product's box (by volume), and the description lists
- * all items. Sender & content come from the primary (first) product; the Hub
- * Customer Code is the parcel's GROUP account field (carried on the order, so a
- * mixed-group warehouse export gets the right code per row).
+ * all items. Content comes from the primary (first) product; the SENDER (cols O–V)
+ * and the Hub Customer Code (col AE) are carried on the ORDER — the sender chosen
+ * at booking and the parcel's group hub — so a mixed-group export is right per row.
  */
 export function buildDtdcRow(order: DtdcOrder, byId: Map<string, Product>): (string | number)[] {
   // Pair each product id with its chosen variant label, keeping index alignment
@@ -96,14 +99,14 @@ export function buildDtdcRow(order: DtdcOrder, byId: Map<string, Product>): (str
     Number(biggest?.lengthCm) || 0,                 // L  length(cm)
     Number(biggest?.widthCm) || 0,                  // M  width(cm)
     Number(biggest?.heightCm) || 0,                 // N  height(cm)
-    p?.senderPincode || '',                         // O  Sender's Pincode
-    p?.senderName || '',                            // P  Sender's Name
-    p?.senderPhone || '',                           // Q  Sender's Phone number
-    p?.senderAddr1 || '',                           // R  Sender's Address Line 1
-    p?.senderAddr2 || '',                           // S  Sender's Address Line 2
-    p?.senderCity || '',                            // T  Sender's City
-    p?.senderState || '',                           // U  Sender's State
-    p?.senderEmail || '',                           // V  Sender's Email
+    order.senderPincode || '',                      // O  Sender's Pincode (booking sender)
+    order.senderName || '',                         // P  Sender's Name
+    order.senderPhone || '',                        // Q  Sender's Phone number
+    order.senderAddr1 || '',                        // R  Sender's Address Line 1
+    order.senderAddr2 || '',                        // S  Sender's Address Line 2
+    order.senderCity || '',                         // T  Sender's City
+    order.senderState || '',                        // U  Sender's State
+    order.senderEmail || '',                        // V  Sender's Email
     order.receiverPincode,                          // W  Receiver's Pincode
     order.receiverName,                             // X  Receiver's Name
     order.receiverPhone,                            // Y  Receiver's Phone Number

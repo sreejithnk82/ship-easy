@@ -1,15 +1,14 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Package, Save, Plus, X, Pencil, Trash2, MapPin, BadgeCheck, Clock, Tag } from 'lucide-react';
-import { api, Product, SenderAddress } from '../lib/api';
+import { Package, Save, Plus, X, Pencil, Trash2, BadgeCheck, Clock, Tag } from 'lucide-react';
+import { api, Product } from '../lib/api';
 import { ApiError } from '../lib/api';
 import { useProfile, isAdmin } from '../lib/profile';
 import { useActiveCustomer } from '../lib/activeCustomer';
-import { NEW_ADDRESS_KEY } from './Addresses';
 import { useToast, useConfirm } from '../components/feedback';
 
+// A product is a pure shipping profile. The "From" sender is chosen per order.
 const EMPTY = {
-  name: '', nickname: '', senderAddressId: '',
+  name: '',
   content: 'OTHERS', description: '', declaredValue: '',
   weightG: '', lengthCm: '', widthCm: '', heightCm: '',
   variants: '', // sub-type labels, comma/newline separated (e.g. "Red, Blue, 100ml")
@@ -20,15 +19,8 @@ type FormState = typeof EMPTY;
 const parseVariants = (s: string): string[] =>
   s.split(/[,\n]/).map((v) => v.trim()).filter(Boolean);
 
-// Sentinel value for the "+ Add new address…" option in the sender dropdown.
-const ADD_NEW = '__add_new__';
-// Where we park the in-progress product form while the user nips off to add an
-// address, so they come back to exactly what they were typing.
-const DRAFT_KEY = 'shipeasy.draftProduct';
-
 export const Products = () => {
   const profile = useProfile();
-  const navigate = useNavigate();
   const { activeId } = useActiveCustomer();
   const customerId = profile?.customerId || activeId;
   // Members can add/edit products (they start "pending"); admins & superadmins
@@ -38,7 +30,6 @@ export const Products = () => {
   const notify = useToast();
   const confirm = useConfirm();
   const [products, setProducts] = useState<Product[]>([]);
-  const [addresses, setAddresses] = useState<SenderAddress[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<FormState>({ ...EMPTY });
@@ -48,28 +39,11 @@ export const Products = () => {
 
   useEffect(() => { if (customerId) load(); else { setProducts([]); setLoading(false); } }, [customerId]);
 
-  // Coming back from the Addresses page: restore the parked draft and select the
-  // address that was just created.
-  useEffect(() => {
-    let draft: { form: FormState; editingId: string | null } | null = null;
-    try { const raw = sessionStorage.getItem(DRAFT_KEY); if (raw) draft = JSON.parse(raw); } catch { /* ignore */ }
-    let newAddrId = '';
-    try { newAddrId = sessionStorage.getItem(NEW_ADDRESS_KEY) || ''; } catch { /* ignore */ }
-    if (draft) {
-      setForm({ ...draft.form, senderAddressId: newAddrId || draft.form.senderAddressId });
-      setEditingId(draft.editingId);
-      setShowForm(true);
-    }
-    try { sessionStorage.removeItem(DRAFT_KEY); sessionStorage.removeItem(NEW_ADDRESS_KEY); } catch { /* ignore */ }
-  }, []);
-
   const load = async () => {
     setLoading(true);
     try {
-      const [{ products }, { addresses }] = await Promise.all([
-        api.listProducts(customerId), api.listSenderAddresses(customerId),
-      ]);
-      setProducts(products); setAddresses(addresses);
+      const { products } = await api.listProducts(customerId);
+      setProducts(products);
     } catch (e: any) {
       notify('Failed to load: ' + e.message, 'error');
     } finally {
@@ -77,19 +51,12 @@ export const Products = () => {
     }
   };
 
-  const openNew = () => {
-    setEditingId(null);
-    setForm({
-      ...EMPTY,
-      senderAddressId: addresses.length === 1 ? addresses[0].addressId : '',
-    });
-    setShowForm(true);
-  };
+  const openNew = () => { setEditingId(null); setForm({ ...EMPTY }); setShowForm(true); };
 
   const startEdit = (p: Product) => {
     setEditingId(p.productId);
     setForm({
-      name: p.name, nickname: p.nickname || '', senderAddressId: p.senderAddressId || '',
+      name: p.name,
       content: p.content || 'OTHERS', description: p.description, declaredValue: String(p.declaredValue),
       weightG: String(p.weightG), lengthCm: String(p.lengthCm), widthCm: String(p.widthCm), heightCm: String(p.heightCm),
       variants: (p.variants || []).join(', '),
@@ -100,28 +67,11 @@ export const Products = () => {
 
   const closeForm = () => { setShowForm(false); setEditingId(null); setForm({ ...EMPTY }); };
 
-  // Park the draft and hop to the Addresses page to create a new "From" address.
-  const goAddAddress = () => {
-    try { sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ form, editingId })); } catch { /* ignore */ }
-    navigate('/addresses?return=1');
-  };
-
-  const onSenderChange = (v: string) => {
-    if (v === ADD_NEW) { goAddAddress(); return; }
-    setForm((f) => ({ ...f, senderAddressId: v }));
-  };
-
   const save = async () => {
     if (!form.name || !form.weightG) { notify('Product name and weight are required.', 'error'); return; }
-    if (!form.nickname.trim()) { notify('Nick name is required.', 'error'); return; }
-    if (!form.senderAddressId) { notify('Choose a sender address.', 'error'); return; }
-    const nn = form.nickname.trim().toLowerCase();
-    if (products.some((p) => p.productId !== editingId && (p.nickname || '').trim().toLowerCase() === nn)) {
-      notify('That nick name is already used by another product.', 'error'); return;
-    }
     setSaving(true);
     const payload = {
-      name: form.name, nickname: form.nickname.trim(), senderAddressId: form.senderAddressId,
+      name: form.name,
       content: form.content || 'OTHERS', description: form.description || form.name,
       declaredValue: Number(form.declaredValue) || 0,
       weightG: Number(form.weightG), lengthCm: Number(form.lengthCm) || 0,
@@ -193,14 +143,6 @@ export const Products = () => {
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '0.75rem' }}>
             <F label="Name *" v={form.name} on={set('name')} ph="e.g. FY CART" />
-            <div className="input-group" style={{ margin: 0 }}>
-              <label className="input-label">Sender Address *</label>
-              <select className="input-field" value={form.senderAddressId} onChange={(e) => onSenderChange(e.target.value)}>
-                <option value="">— choose —</option>
-                {addresses.map((a) => <option key={a.addressId} value={a.addressId}>{a.label || a.senderName}</option>)}
-                <option value={ADD_NEW}>+ Add new address…</option>
-              </select>
-            </div>
             <F label="Content" v={form.content} on={set('content')} ph="OTHERS / PERFUMES / CLOTHING" />
             <F label="Description" v={form.description} on={set('description')} ph="DTDC item text e.g. MOBILE CASE" />
             <F label="Declared Value (₹)" type="number" v={form.declaredValue} on={set('declaredValue')} />
@@ -208,15 +150,6 @@ export const Products = () => {
             <F label="Length (cm)" type="number" v={form.lengthCm} on={set('lengthCm')} />
             <F label="Width (cm)" type="number" v={form.widthCm} on={set('widthCm')} />
             <F label="Height (cm)" type="number" v={form.heightCm} on={set('heightCm')} />
-          </div>
-
-          <div className="input-group" style={{ margin: '0.75rem 0 0' }}>
-            <label className="input-label">Nick Name *</label>
-            <input className="input-field" value={form.nickname} onChange={(e) => set('nickname')(e.target.value)}
-              placeholder="e.g. Perfumaina - Nihal" />
-            <p style={{ margin: '0.35rem 0 0', fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-              Internal owner tag — shown in reports &amp; pickers, never printed on the label. Must be unique.
-            </p>
           </div>
 
           <div className="input-group" style={{ margin: '0.75rem 0 0' }}>
@@ -232,12 +165,6 @@ export const Products = () => {
               Same weight &amp; size for all — the chosen label is added to the order and DTDC description.
             </p>
           </div>
-
-          {addresses.length === 0 && (
-            <p style={{ marginTop: '0.75rem', fontSize: '0.85rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-              <MapPin size={15} /> No sender addresses yet — pick "+ Add new address…" above to create one.
-            </p>
-          )}
 
           <button className="btn btn-primary" onClick={save} disabled={saving} style={{ marginTop: '1.5rem' }}>
             <Save size={18} /> {saving ? 'Saving…' : editingId ? 'Update' : 'Save'}
@@ -256,13 +183,7 @@ export const Products = () => {
                   {canVerify && <button title="Delete" onClick={() => remove(p)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger-color)', padding: '0.2rem' }}><Trash2 size={17} /></button>}
                 </div>
               )}
-              <h4 style={{ margin: '0 0 0.25rem 0', paddingRight: canManage ? (canVerify ? '4.5rem' : '2.5rem') : 0 }}>{p.name}</h4>
-              {p.nickname && (
-                <div style={{ fontSize: '0.78rem', color: 'var(--primary-color)', fontWeight: 600, marginBottom: '0.2rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                  <Tag size={12} /> {p.nickname}
-                </div>
-              )}
-              <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>{p.senderName}</div>
+              <h4 style={{ margin: '0 0 0.5rem 0', paddingRight: canManage ? (canVerify ? '4.5rem' : '2.5rem') : 0 }}>{p.name}</h4>
               <p style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--primary-color)', margin: '0 0 1rem 0' }}>₹{p.declaredValue}</p>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
                 {p.status === 'pending'

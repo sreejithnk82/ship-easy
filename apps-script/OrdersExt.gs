@@ -125,12 +125,15 @@ function action_listOrders_(payload, ctx) {
   if (c.error) return c.error;
   var limit = Math.min(Number(payload.limit) || 300, 2000);
 
-  var sheet = getSheetOrThrow_(getCustomerSpreadsheet_(c.id), SHEETS.ORDERS);
+  var ss = getCustomerSpreadsheet_(c.id);
+  var addrById = senderAddressMap_(ss);
+  var sheet = getSheetOrThrow_(ss, SHEETS.ORDERS);
   var rows = readObjects_(sheet).rows;
   rows.sort(function (a, b) { return String(b.created_at).localeCompare(String(a.created_at)); });
   if (rows.length > limit) rows = rows.slice(0, limit);
 
   var orders = rows.map(function (r) {
+    var snd = senderForOrder_(r, addrById);
     return {
       orderId: String(r.order_id || ''),
       batchId: String(r.batch_id || ''),
@@ -149,6 +152,8 @@ function action_listOrders_(payload, ctx) {
       exportedAt: r.exported_at ? String(r.exported_at) : '',
       shippedAt: r.shipped_at ? String(r.shipped_at) : '',
       voidedAt: r.voided_at ? String(r.voided_at) : '',
+      senderAddressId: snd.senderAddressId,
+      senderName: snd.senderName,   // chosen at booking → label "From:"
       createdAt: String(r.created_at || ''),
     };
   });
@@ -158,12 +163,11 @@ function action_listOrders_(payload, ctx) {
 /* --------------------------- shipment report --------------------------- */
 
 /**
- * Group-wise SHIPPED report for a date range: for each customer GROUP that has
- * shipments in the range, its products broken down by owner nick name — each with
- * a total + per-state split. A superadmin spans EVERY group; a scoped user
- * (operator/admin) sees only their own. Groups with no shipments in the range are
- * omitted. Reads each group's Orders sheet directly (accurate across devices).
- * Optional fromDay/toDay are IST "yyyy-mm-dd".
+ * SHIPPED report for a date range, nested GROUP → SENDER → PRODUCT (each with a
+ * total + per-state split). The Sender is the "From" chosen at booking. A
+ * superadmin / warehouse operator spans EVERY group; a scoped admin sees only its
+ * own. Groups with no shipments in the range are omitted. Reads each group's
+ * Orders sheet directly. Optional fromDay/toDay are IST "yyyy-mm-dd".
  */
 function action_shipmentReport_(payload, ctx) {
   if (!canScan_(ctx)) return forbidden_();
@@ -187,9 +191,9 @@ function action_shipmentReport_(payload, ctx) {
   targets.forEach(function (t) {
     var ss;
     try { ss = SpreadsheetApp.openById(t.ssId); } catch (e) { return; }   // skip a broken group
-    var b = shippedProductBreakdown_(ss, fromDay, toDay);
+    var b = shippedSenderBreakdown_(ss, fromDay, toDay);
     if (b.total === 0) return;                                            // only groups scanned in range
-    groups.push({ customerId: t.id, name: t.name, total: b.total, products: b.products });
+    groups.push({ customerId: t.id, name: t.name, total: b.total, senders: b.senders });
     grand += b.total;
   });
   groups.sort(function (a, b) { return b.total - a.total; });
@@ -197,39 +201,48 @@ function action_shipmentReport_(payload, ctx) {
 }
 
 /**
- * One group's shipped parcels in [fromDay,toDay], grouped by PRIMARY product
- * (extras ignored → one count per parcel): { total, products:[{product, nickname,
- * total, states}] } sorted by total desc.
+ * One group's shipped parcels in [fromDay,toDay], nested SENDER → primary PRODUCT
+ * (extras ignored → one count per parcel). Returns { total, senders:[{ sender,
+ * total, products:[{product, total, states}] }] } sorted by total desc. The Sender
+ * is the "From" chosen at booking (order.sender_address_id → its Name).
  */
-function shippedProductBreakdown_(ss, fromDay, toDay) {
-  var rows = readObjects_(getSheetOrThrow_(ss, SHEETS.ORDERS)).rows;
-  var prodById = {};
+function shippedSenderBreakdown_(ss, fromDay, toDay) {
+  var addrById = senderAddressMap_(ss);
+  var prodName = {};
   readObjects_(getSheetOrThrow_(ss, SHEETS.PRODUCTS)).rows.forEach(function (pr) {
-    prodById[String(pr.product_id)] = { name: String(pr.name || ''), nickname: String(pr.nickname || '') };
+    prodName[String(pr.product_id)] = String(pr.name || '');
   });
-  var byProduct = {}, total = 0;
-  rows.forEach(function (r) {
+  var bySender = {}, total = 0;
+  readObjects_(getSheetOrThrow_(ss, SHEETS.ORDERS)).rows.forEach(function (r) {
     if (String(r.status) !== 'shipped') return;
     var day = String(r.shipped_at || r.created_at || '').slice(0, 10);   // shipped_at already IST
     if (!day) return;
     if (fromDay && day < fromDay) return;                                // yyyy-mm-dd sorts lexicographically
     if (toDay && day > toDay) return;
     var st = String(r.receiver_state || '').trim() || '—';
+    var snd = senderForOrder_(r, addrById);
+    var sKey = snd.senderAddressId || '(no sender)';
+    if (!bySender[sKey]) bySender[sKey] = { sender: snd.senderName || '(no sender)', total: 0, byProduct: {} };
+    var g = bySender[sKey];
     var pid = String(r.product_id || '');
-    if (!byProduct[pid]) {
-      // If the order's product no longer exists (deleted / sheet reset), show a
-      // friendly label instead of leaking the raw product_id UUID.
-      var m = prodById[pid];
-      var nm = (m && m.name) ? m.name : '(product removed)';
-      byProduct[pid] = { product: nm, nickname: (m && m.nickname) ? m.nickname : nm, total: 0, states: {} };
+    if (!g.byProduct[pid]) {
+      // Deleted / reset product → friendly label instead of the raw UUID.
+      g.byProduct[pid] = { product: prodName[pid] || '(product removed)', total: 0, states: {} };
     }
-    byProduct[pid].total += 1;
-    byProduct[pid].states[st] = (byProduct[pid].states[st] || 0) + 1;
+    g.byProduct[pid].total += 1;
+    g.byProduct[pid].states[st] = (g.byProduct[pid].states[st] || 0) + 1;
+    g.total += 1;
     total += 1;
   });
-  var products = Object.keys(byProduct).map(function (k) { return byProduct[k]; })
-    .sort(function (a, b) { return b.total - a.total; });
-  return { total: total, products: products };
+  var senders = Object.keys(bySender).map(function (k) {
+    var g = bySender[k];
+    return {
+      sender: g.sender, total: g.total,
+      products: Object.keys(g.byProduct).map(function (p) { return g.byProduct[p]; })
+        .sort(function (a, b) { return b.total - a.total; }),
+    };
+  }).sort(function (a, b) { return b.total - a.total; });
+  return { total: total, senders: senders };
 }
 
 /* ------------------------------ balances ------------------------------ */

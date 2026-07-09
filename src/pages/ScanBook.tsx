@@ -265,6 +265,9 @@ export const ScanBook = () => {
       receiverPincode: s.receiverPincode, receiverLine1: s.receiverLine1,
       receiverLine2: s.receiverLine2, receiverState: s.receiverState,
       hubCustomerCode: s.hubCustomerCode,
+      // The "From" sender chosen at booking → DTDC cols O–V.
+      senderName: s.senderName, senderPhone: s.senderPhone, senderAddr1: s.senderAddr1, senderAddr2: s.senderAddr2,
+      senderCity: s.senderCity, senderState: s.senderState, senderPincode: s.senderPincode, senderEmail: s.senderEmail,
     }));
     downloadDtdc(rows, products);
   };
@@ -516,35 +519,37 @@ const ShipmentReportModal = ({ report, loading, from, to, singleDay, onFrom, onT
                   <strong style={{ fontSize: '1.05rem' }}>{g.name}</strong>
                   <span className="badge badge-completed" style={{ whiteSpace: 'nowrap' }}>{g.total} shipped</span>
                 </div>
-                {/* Product cards for this group — nick name + total + state counts */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '0.85rem' }}>
-                  {g.products.map((p, i) => (
-                    <div key={p.product + '|' + p.nickname + i} style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '0.85rem', background: 'var(--card-bg, white)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem' }}>
-                        <div style={{ minWidth: 0 }}>
-                          <div style={{ fontWeight: 700, fontSize: '0.95rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.product}</div>
-                          {p.nickname && p.nickname !== p.product && (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', color: 'var(--primary-color)', fontWeight: 600, fontSize: '0.78rem', marginTop: '0.15rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              <Tag size={12} /> {p.nickname}
-                            </div>
-                          )}
-                        </div>
-                        <div style={{ textAlign: 'right', whiteSpace: 'nowrap', color: 'var(--primary-color)', lineHeight: 1.1 }}>
-                          <span style={{ fontWeight: 800, fontSize: '1.35rem' }}>{p.total}</span>
-                          <div style={{ fontSize: '0.65rem', color: 'var(--text-secondary)' }}>shipped</div>
-                        </div>
-                      </div>
-                      <div style={{ marginTop: '0.6rem', borderTop: '1px dashed var(--border-color)', paddingTop: '0.55rem' }}>
-                        <div style={{ fontSize: '0.66rem', textTransform: 'uppercase', letterSpacing: '0.03em', color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>By state</div>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem' }}>
-                          {Object.entries(p.states).sort((a, b) => b[1] - a[1]).map(([st, n]) => (
-                            <span key={st} className="badge badge-primary" style={{ fontSize: '0.72rem' }}>{st}: {n}</span>
-                          ))}
-                        </div>
-                      </div>
+
+                {/* Sender → product cards */}
+                {g.senders.map((s, si) => (
+                  <div key={s.sender + si} style={{ marginBottom: '1rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', margin: '0 0 0.5rem', color: 'var(--primary-color)', fontWeight: 700, fontSize: '0.9rem' }}>
+                      <Tag size={14} /> {s.sender}
+                      <span className="badge badge-gray" style={{ fontSize: '0.7rem', marginLeft: 'auto' }}>{s.total}</span>
                     </div>
-                  ))}
-                </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '0.75rem' }}>
+                      {s.products.map((p, i) => (
+                        <div key={p.product + i} style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '0.8rem', background: 'var(--card-bg, white)', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem' }}>
+                            <div style={{ fontWeight: 700, fontSize: '0.92rem', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.product}</div>
+                            <div style={{ textAlign: 'right', whiteSpace: 'nowrap', color: 'var(--primary-color)', lineHeight: 1.1 }}>
+                              <span style={{ fontWeight: 800, fontSize: '1.3rem' }}>{p.total}</span>
+                              <div style={{ fontSize: '0.62rem', color: 'var(--text-secondary)' }}>shipped</div>
+                            </div>
+                          </div>
+                          <div style={{ marginTop: '0.55rem', borderTop: '1px dashed var(--border-color)', paddingTop: '0.5rem' }}>
+                            <div style={{ fontSize: '0.64rem', textTransform: 'uppercase', letterSpacing: '0.03em', color: 'var(--text-secondary)', marginBottom: '0.3rem' }}>By state</div>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem' }}>
+                              {Object.entries(p.states).sort((a, b) => b[1] - a[1]).map(([st, n]) => (
+                                <span key={st} className="badge badge-primary" style={{ fontSize: '0.72rem' }}>{st}: {n}</span>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
               </div>
             ))}
           </>

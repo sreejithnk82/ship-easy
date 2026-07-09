@@ -9,6 +9,7 @@ import type { Product } from './api';
 export interface LabelOrder {
   trackingId: string;
   productId: string;
+  senderName?: string;         // the "From" sender chosen at booking (prints on the label)
   variant?: string;
   extraProductIds?: string[];  // additional products in the same parcel
   extraVariants?: string[];    // labels, index-aligned with extraProductIds
@@ -48,7 +49,7 @@ export function buildLabelFields(o: LabelOrder, byId: Map<string, Product>): Lab
 
   return {
     trackingId: String(o.trackingId || ''),
-    fromName: primary?.senderName || '',
+    fromName: o.senderName || '',   // sender chosen at booking (no longer on the product)
     toName: o.receiverName || '',
     phone: String(o.receiverPhone || ''),
     addrLines: [o.receiverLine1, o.receiverLine2].filter(Boolean) as string[],

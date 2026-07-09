@@ -180,6 +180,7 @@ function orderRowObj_(batchId, operatorEmail, createdAt, o) {
     receiver_line1: o.receiverLine1 || '',
     receiver_line2: o.receiverLine2 || '',
     receiver_state: o.receiverState || '',
+    sender_address_id: o.senderAddressId || '',   // sender chosen at booking
     status: 'labeled',
     operator_email: operatorEmail,
     created_at: createdAt,
@@ -188,7 +189,7 @@ function orderRowObj_(batchId, operatorEmail, createdAt, o) {
 
 function writeOrderRows_(ss, batchId, operatorEmail, createdAt, enrichedOrders) {
   // Make sure the multi-product column exists on older sheets before writing.
-  var ordersSheet = ensureColumns_(getSheetOrThrow_(ss, SHEETS.ORDERS), ['extra_product_ids', 'variant', 'extra_variants']);
+  var ordersSheet = ensureColumns_(getSheetOrThrow_(ss, SHEETS.ORDERS), ['extra_product_ids', 'variant', 'extra_variants', 'sender_address_id']);
   var objs = enrichedOrders.map(function (o) {
     return orderRowObj_(batchId, operatorEmail, createdAt, o);
   });

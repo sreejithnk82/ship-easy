@@ -70,13 +70,9 @@ export interface SenderAddress {
   senderPincode: string; senderEmail: string;
 }
 export interface Product {
+  // A pure shipping profile. The "From" sender is chosen per ORDER at booking.
   productId: string;
   name: string;
-  nickname: string;       // internal owner tag (e.g. "Perfumaina - Nihal") — reports/pickers, never printed
-  senderAddressId: string;
-  // Sender block is resolved live from the referenced address (read-only here).
-  senderName: string; senderPhone: string; senderAddr1: string; senderAddr2: string;
-  senderCity: string; senderState: string; senderPincode: string; senderEmail: string;
   content: string;
   description: string;
   declaredValue: number;
@@ -86,6 +82,7 @@ export interface Product {
 }
 export interface OrderInput {
   clientOrderId: string; productId: string;
+  senderAddressId: string;    // the "From" sender chosen at booking
   extraProductIds?: string[]; // up to 4 more products in the SAME parcel (one label)
   variant?: string;           // chosen sub-type label for the primary product
   extraVariants?: string[];   // chosen labels, index-aligned with extraProductIds
@@ -94,9 +91,11 @@ export interface OrderInput {
 }
 export interface OpenOrder extends Omit<OrderInput, 'clientOrderId'> {
   orderId: string; trackingId: string; exportedAt?: string;
-  // Group tags — export/ship are routed to this group, and the DTDC row's hub
-  // code (col AE) comes from it. Present on both single- and cross-group loads.
+  // Group tags — export/ship route to this group; the DTDC hub code (col AE) is its.
   customerId: string; hubCustomerCode: string; groupName?: string;
+  // The order's resolved sender (chosen at booking) → label "From:" + DTDC cols O–V.
+  senderName: string; senderPhone: string; senderAddr1: string; senderAddr2: string;
+  senderCity: string; senderState: string; senderPincode: string; senderEmail: string;
 }
 export interface Assignment { clientOrderId: string; trackingId: string; }
 
@@ -107,15 +106,18 @@ export interface OrderRow {
   receiverName: string; receiverPhone: string; receiverPincode: string;
   receiverLine1: string; receiverLine2: string; receiverState: string;
   status: 'labeled' | 'shipped' | 'void' | string;
+  senderAddressId?: string; senderName?: string;   // sender chosen at booking → label "From:"
   exportedAt: string; shippedAt: string; voidedAt: string; createdAt: string;
 }
 export interface Balance { customerId: string; name: string; remaining: number; low: boolean; }
 export interface Health { orderRows: number; columns: number; orderCells: number; cellLimit: number; warn: boolean; pctOfLimit: number; }
-// A product's shipped tally: name, owner nick name, total, per-state split.
-export interface ShipmentReportProduct { product: string; nickname: string; total: number; states: Record<string, number>; }
-// A customer GROUP's shipped tally over the range: its products (each by nick name).
-export interface ShipmentReportGroup { customerId: string; name: string; total: number; products: ShipmentReportProduct[]; }
-// Group-wise report: for each group with shipments in the range → products → states.
+// A product's shipped tally under a sender: name, total, per-state split.
+export interface ShipmentReportProduct { product: string; total: number; states: Record<string, number>; }
+// A Sender's shipped tally: the "From" name chosen at booking + its products.
+export interface ShipmentReportSender { sender: string; total: number; products: ShipmentReportProduct[]; }
+// A customer GROUP's shipped tally over the range: its senders.
+export interface ShipmentReportGroup { customerId: string; name: string; total: number; senders: ShipmentReportSender[]; }
+// Report nested: group → sender → product → states.
 export interface ShipmentReport { groups: ShipmentReportGroup[]; total: number; }
 
 export interface Customer {

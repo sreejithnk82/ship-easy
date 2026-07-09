@@ -35,31 +35,15 @@ function action_listProducts_(payload, ctx) {
   if (c.error) return c.error;
   var ss = getCustomerSpreadsheet_(c.id);
   var rows = readObjects_(getSheetOrThrow_(ss, SHEETS.PRODUCTS)).rows;
-  var addrById = senderAddressMap_(ss);
-  var products = rows.map(function (r) { return productFromRow_(r, addrById); });
-  return { ok: true, products: products };
+  return { ok: true, products: rows.map(productFromRow_) };
 }
 
-// The sender block lives on a referenced SenderAddress (resolved live here) so
-// editing an address flows through to every product using it.
-function productFromRow_(r, addrById) {
-  var addrId = r.sender_address_id ? String(r.sender_address_id) : '';
-  var a = (addrId && addrById) ? addrById[addrId] : null;
+// A product is a pure shipping profile. The "From" sender is chosen per ORDER
+// (at booking), not stored on the product.
+function productFromRow_(r) {
   return {
     productId: r.product_id,
     name: r.name,
-    // Internal owner tag (e.g. "Perfumaina - Nihal") — used in reports/pickers,
-    // never printed on the label.
-    nickname: r.nickname || '',
-    senderAddressId: addrId,
-    senderName: a ? a.senderName : '',
-    senderPhone: a ? a.senderPhone : '',
-    senderAddr1: a ? a.senderAddr1 : '',
-    senderAddr2: a ? a.senderAddr2 : '',
-    senderCity: a ? a.senderCity : '',
-    senderState: a ? a.senderState : '',
-    senderPincode: a ? a.senderPincode : '',
-    senderEmail: a ? a.senderEmail : '',
     content: r.content || 'OTHERS',
     description: r.description || r.name,
     declaredValue: Number(r.declared_value) || 0,
@@ -68,19 +52,17 @@ function productFromRow_(r, addrById) {
     widthCm: Number(r.width_cm) || 0,
     heightCm: Number(r.height_cm) || 0,
     // Optional sub-type labels (color / material / ml …). Same shipping profile;
-    // the chosen label is recorded on the order, not a separate product.
+    // the chosen label is recorded on the order.
     variants: parseIdList_(r.variants),
-    // Approval workflow: blank/legacy rows count as verified; new member-added
-    // products start 'pending' until an admin/superadmin verifies them.
+    // Approval workflow: new member-added products start 'pending' until an
+    // admin/superadmin verifies them.
     status: r.status ? String(r.status) : 'verified',
   };
 }
 
-/** camelCase product field -> sheet column. Shared by add/update. The sender
- *  block is NOT stored here — it's resolved live from the referenced address. */
+/** camelCase product field -> sheet column. Shared by add/update. */
 var PRODUCT_COLMAP = {
-  name: 'name', nickname: 'nickname',
-  senderAddressId: 'sender_address_id', content: 'content',
+  name: 'name', content: 'content',
   description: 'description', declaredValue: 'declared_value', weightG: 'weight_g',
   lengthCm: 'length_cm', widthCm: 'width_cm', heightCm: 'height_cm',
   variants: 'variants',
@@ -109,31 +91,15 @@ function canManageProducts_(ctx) {
   return ctx.role === 'member' || isAdmin_(ctx);
 }
 
-/** True if another product (not excludeId) already uses this nick name. The
- *  nick name is the report's owner tag, so it must be unique per customer. */
-function productNicknameTaken_(rows, nickname, excludeId) {
-  var nn = String(nickname || '').trim().toLowerCase();
-  if (!nn) return false;
-  return rows.some(function (r) {
-    return String(r.product_id) !== String(excludeId || '') &&
-           String(r.nickname || '').trim().toLowerCase() === nn;
-  });
-}
-
 function action_addProduct_(payload, ctx) {
   if (!canManageProducts_(ctx)) return forbidden_();
   var c = resolveCustomerId_(payload, ctx);
   if (c.error) return c.error;
   var p = normalizeProductPayload_(payload.product || {});
   if (!p.name) return badRequest_('product.name is required');
-  if (!p.nickname || !String(p.nickname).trim()) return badRequest_('product.nickname is required');
-  if (!p.senderAddressId) return badRequest_('a sender address is required');
 
   var ss = getCustomerSpreadsheet_(c.id);
   var sheet = ensureColumns_(getSheetOrThrow_(ss, SHEETS.PRODUCTS), productColumns_());
-  if (productNicknameTaken_(readObjects_(sheet).rows, p.nickname, null)) {
-    return badRequest_('That nick name is already used by another product.');
-  }
   var productId = Utilities.getUuid();
   var row = { product_id: productId, created_at: nowIso_(), created_by: ctx.email };
   Object.keys(PRODUCT_COLMAP).forEach(function (k) {
@@ -160,12 +126,6 @@ function action_updateProduct_(payload, ctx) {
   var data = readObjects_(sheet);
   var row = data.rows.find(function (r) { return String(r.product_id) === String(productId); });
   if (!row) return { ok: false, error: 'NOT_FOUND' };
-  if (p.nickname !== undefined) {
-    if (!String(p.nickname).trim()) return badRequest_('product.nickname is required');
-    if (productNicknameTaken_(data.rows, p.nickname, productId)) {
-      return badRequest_('That nick name is already used by another product.');
-    }
-  }
   var setCell = function (name, val) { var col = data.headers.indexOf(name) + 1; if (col > 0) sheet.getRange(row._row, col).setValue(val); };
 
   // Compare a new value against the stored one, treating blank as 0 for numbers
@@ -185,17 +145,17 @@ function action_updateProduct_(payload, ctx) {
     var col = data.headers.indexOf(colName) + 1;
     if (col < 1) return;
     // Only a change to a real shipping field forces a member's product back to
-    // pending. Variant labels and the nick name don't affect the parcel, so
-    // editing just those keeps the product verified.
-    if (k !== 'variants' && k !== 'nickname' && !eq_(row[colName], p[k])) shippingChanged = true;
+    // pending. Variant labels don't affect the parcel, so editing just those
+    // keeps the product verified.
+    if (k !== 'variants' && !eq_(row[colName], p[k])) shippingChanged = true;
     sheet.getRange(row._row, col).setValue(p[k]);
     changed++;
   });
   // Re-verification policy on edit:
   //  • admin/superadmin edits stay verified;
   //  • a member edit that touched a shipping field goes back to pending;
-  //  • a member edit that changed ONLY the variant labels or nick name keeps its
-  //    current status — the parcel is identical, so no admin re-approval is needed.
+  //  • a member edit that changed ONLY the variant labels keeps its current
+  //    status — the parcel is identical, so no admin re-approval is needed.
   if (isAdmin_(ctx)) { setCell('status', 'verified'); setCell('verified_by', ctx.email); setCell('verified_at', nowIso_()); }
   else if (shippingChanged) { setCell('status', 'pending'); setCell('verified_by', ''); setCell('verified_at', ''); }
   SpreadsheetApp.flush();
@@ -358,12 +318,32 @@ function action_deleteSenderAddress_(payload, ctx) {
 
 /* ------------------------ hub: scan & ship ----------------------------- */
 
-/** Open ('labeled') orders for ONE group, each stamped with its group id / hub
- *  code / name so the scan screen can export + mark shipped per group. */
+/** Resolve an order's chosen sender (sender_address_id) against the group's
+ *  address list → the "From" block used on the label + DTDC + report. */
+function senderForOrder_(r, addrById) {
+  var id = r.sender_address_id ? String(r.sender_address_id) : '';
+  var a = (id && addrById) ? addrById[id] : null;
+  return {
+    senderAddressId: id,
+    senderName: a ? a.senderName : '',
+    senderPhone: a ? a.senderPhone : '',
+    senderAddr1: a ? a.senderAddr1 : '',
+    senderAddr2: a ? a.senderAddr2 : '',
+    senderCity: a ? a.senderCity : '',
+    senderState: a ? a.senderState : '',
+    senderPincode: a ? a.senderPincode : '',
+    senderEmail: a ? a.senderEmail : '',
+  };
+}
+
+/** Open ('labeled') orders for ONE group, each stamped with its group id / hub /
+ *  name AND its resolved sender (chosen at booking) for export + label. */
 function openOrdersForGroup_(ss, customerId, hubCode, groupName) {
+  var addrById = senderAddressMap_(ss);
   return readObjects_(getSheetOrThrow_(ss, SHEETS.ORDERS)).rows
     .filter(function (r) { return String(r.status) === 'labeled'; })
     .map(function (r) {
+      var snd = senderForOrder_(r, addrById);
       return {
         orderId: r.order_id,
         trackingId: String(r.tracking_id),
@@ -378,11 +358,16 @@ function openOrdersForGroup_(ss, customerId, hubCode, groupName) {
         receiverLine2: r.receiver_line2,
         receiverState: r.receiver_state,
         exportedAt: r.exported_at ? String(r.exported_at) : '',
-        // Group tags → the DTDC "Hub Customer Code" (col AE) is a group-level
-        // account field, and export/ship are routed back to this group.
+        // Group tags → hub (col AE) is a group account; export/ship route to it.
         customerId: String(customerId),
         hubCustomerCode: String(hubCode || ''),
         groupName: String(groupName || ''),
+        // Sender chosen at booking → label "From:" + DTDC sender (cols O–V).
+        senderAddressId: snd.senderAddressId,
+        senderName: snd.senderName, senderPhone: snd.senderPhone,
+        senderAddr1: snd.senderAddr1, senderAddr2: snd.senderAddr2,
+        senderCity: snd.senderCity, senderState: snd.senderState,
+        senderPincode: snd.senderPincode, senderEmail: snd.senderEmail,
       };
     });
 }
@@ -412,9 +397,8 @@ function action_listAllOpenOrders_(payload, ctx) {
     var open = openOrdersForGroup_(ss, r.customer_id, r.hub_customer_code, r.name);
     if (!open.length) return;                          // skip groups with nothing open
     orders = orders.concat(open);
-    var addrById = senderAddressMap_(ss);
     readObjects_(getSheetOrThrow_(ss, SHEETS.PRODUCTS)).rows.forEach(function (pr) {
-      products.push(productFromRow_(pr, addrById));
+      products.push(productFromRow_(pr));
     });
   });
   return { ok: true, orders: orders, products: products };
