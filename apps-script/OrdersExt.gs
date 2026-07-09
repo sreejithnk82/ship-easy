@@ -221,8 +221,11 @@ function shippedSenderBreakdown_(ss, fromDay, toDay) {
     if (toDay && day > toDay) return;
     var st = String(r.receiver_state || '').trim() || '—';
     var snd = senderForOrder_(r, addrById);
+    // The report groups by the address LABEL (the human-friendly picker id);
+    // senderName is reserved for what prints on the label/DTDC.
+    var addr = snd.senderAddressId ? addrById[snd.senderAddressId] : null;
     var sKey = snd.senderAddressId || '(no sender)';
-    if (!bySender[sKey]) bySender[sKey] = { sender: snd.senderName || '(no sender)', total: 0, byProduct: {} };
+    if (!bySender[sKey]) bySender[sKey] = { sender: (addr && (addr.label || addr.senderName)) || '(no sender)', total: 0, byProduct: {} };
     var g = bySender[sKey];
     var pid = String(r.product_id || '');
     if (!g.byProduct[pid]) {

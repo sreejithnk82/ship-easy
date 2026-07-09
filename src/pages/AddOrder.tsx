@@ -407,7 +407,7 @@ export const AddOrder = () => {
               <select className="input-field" value={f.senderAddressId} onChange={(e) => setF({ ...f, senderAddressId: e.target.value })}
                 style={attempted && !f.senderAddressId ? { borderColor: 'var(--danger-color)' } : undefined}>
                 <option value="">-- Choose sender --</option>
-                {addresses.map((a) => <option key={a.addressId} value={a.addressId}>{a.senderName}{a.senderCity ? ` · ${a.senderCity}` : ''}</option>)}
+                {addresses.map((a) => <option key={a.addressId} value={a.addressId}>{a.label || a.senderName}</option>)}
               </select>
               {attempted && !f.senderAddressId && <div style={{ color: 'var(--danger-color)', fontSize: '0.75rem', marginTop: '0.25rem' }}>Select a sender</div>}
               {addresses.length === 0 && <div style={{ color: 'var(--text-secondary)', fontSize: '0.75rem', marginTop: '0.25rem' }}>No senders yet — ask your admin to add a sender address.</div>}

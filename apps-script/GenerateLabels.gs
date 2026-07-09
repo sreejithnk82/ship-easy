@@ -217,6 +217,9 @@ function cloneOrder_(o) {
     clientOrderId: o.clientOrderId,
     productId: o.productId,
     extraProductIds: Array.isArray(o.extraProductIds) ? o.extraProductIds : [],
+    variant: o.variant || '',
+    extraVariants: Array.isArray(o.extraVariants) ? o.extraVariants : [],
+    senderAddressId: o.senderAddressId || '',   // sender chosen at booking → persisted on the order
     receiverName: o.receiverName,
     receiverPhone: o.receiverPhone,
     receiverPincode: o.receiverPincode,
